@@ -98,6 +98,13 @@ var penaltyFields2024 = map[string]string{
 
 var DEFAULT_BREAKDOWN_VALUES_2024 = map[string]any{}
 
+// year-specific:
+
+var stageFields2024 = map[string]string{
+	"note in trap": "trap",
+	"spotlit":      "mic",
+}
+
 func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]interface{}, error) {
 	//////////////////////////////////////////////////
 	// Parse html from FMS into TBA-compatible JSON //
@@ -339,6 +346,18 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 				})
 
 				// begin year-specific
+			} else if row_name == "leave" {
+				assignBreakdownRobotFields(breakdown, "autoLineRobot", boolToYesNo, breakdownRobotFields[bool]{
+					blue: iconsToBools(blue_cell, 3, "fa-check", "fa-times"),
+					red:  iconsToBools(red_cell, 3, "fa-check", "fa-times"),
+				})
+			} else if api_field_prefix, ok := stageFields2024[row_name]; ok {
+				blue_values := iconsToBools(blue_cell, 3, "fa-check", "fa-times")
+				red_values := iconsToBools(red_cell, 3, "fa-check", "fa-times")
+				for i, api_field_suffix := range []string{"StageRight", "CenterStage", "StageLeft"} {
+					breakdown["blue"][api_field_prefix+api_field_suffix] = blue_values[i]
+					breakdown["red"][api_field_prefix+api_field_suffix] = red_values[i]
+				}
 			} else {
 				breakdown["blue"]["!"+row_name] = blue_text
 				breakdown["red"]["!"+row_name] = red_text
