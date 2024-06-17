@@ -352,6 +352,7 @@ func parseHTMLtoJSON2023(filename string, config FMSParseConfig) (map[string]int
 					red:  checkParseInt(red_text, "red "+api_field),
 				})
 			} else if api_field_suffix, ok := simpleIntMatchPhaseFields2023[row_name]; ok {
+				validateMatchPhase(match_phase)
 				api_field := match_phase + api_field_suffix
 				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[int], breakdownAllianceFields[int]{
 					blue: checkParseInt(blue_text, "blue "+api_field),
