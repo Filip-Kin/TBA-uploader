@@ -81,6 +81,12 @@ var simpleIntMatchPhaseFields2024 = map[string]string{
 	"speaker note points": "SpeakerNotePoints",
 }
 
+var totalIntFields2024 = map[string][]string{
+	"autoTotalNotePoints":     {"autoAmpNotePoints", "autoSpeakerNotePoints"},
+	"teleopTotalNotePoints":   {"teleopAmpNotePoints", "teleopSpeakerNotePoints"},
+	"endGameTotalStagePoints": {"endGameParkPoints", "endGameOnStagePoints", "endGameSpotLightBonusPoints", "endGameHarmonyPoints", "endGameNoteInTrapPoints"},
+}
+
 var simpleStringFields2024 = map[string]string{}
 
 var simpleIconFields2024 = map[string]string{
@@ -277,15 +283,10 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 			} else if api_field_suffix, ok := simpleIntMatchPhaseFields2024[row_name]; ok {
 				validateMatchPhase(match_phase)
 				api_field := match_phase + api_field_suffix
-				values := breakdownAllianceFields[int]{
+				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[int], breakdownAllianceFields[int]{
 					blue: checkParseInt(blue_text, "blue "+api_field),
 					red:  checkParseInt(red_text, "red "+api_field),
-				}
-				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[int], values)
-
-				if api_field_suffix == "AmpNotePoints" || api_field_suffix == "SpeakerNotePoints" {
-					incrementBreakdownAllianceFieldsBy(breakdown, match_phase+"TotalNotePoints", values)
-				}
+				})
 			} else if api_field, ok := simpleIconFields2024[row_name]; ok {
 				assignBreakdownAllianceFields[bool](breakdown, api_field, identity_fn[bool], breakdownAllianceFields[bool]{
 					blue: iconToBool(blue_cell.Find("i"), "fa-check", "fa-times"),
@@ -369,6 +370,10 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 			}
 		}
 	})
+
+	for total_field, component_fields := range totalIntFields2024 {
+		assignTotalField(breakdown, total_field, component_fields)
+	}
 
 	if config.EnabledExtraRps != nil {
 		assignBreakdownExtraRps(breakdown, config.EnabledExtraRps, map[string][]bool{

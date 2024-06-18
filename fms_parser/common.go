@@ -147,14 +147,6 @@ func assignBreakdownAllianceFieldsConst[T any](breakdowns map[string]map[string]
 	breakdowns["red"][field] = value
 }
 
-func incrementBreakdownAllianceFieldsBy(breakdowns map[string]map[string]interface{}, field string, values breakdownAllianceFields[int]) {
-	var old int
-	old, _ = breakdowns["blue"][field].(int)
-	breakdowns["blue"][field] = old + values.blue
-	old, _ = breakdowns["red"][field].(int)
-	breakdowns["red"][field] = old + values.red
-}
-
 type breakdownRobotFields[T any] struct {
 	blue []T
 	red  []T
@@ -266,5 +258,22 @@ func assignBreakdownExtraRps(breakdowns map[string]map[string]interface{}, enabl
 		if ok {
 			breakdowns[color]["rp"] = existing_rp + alliance_extra_rp
 		}
+	}
+}
+
+func assignTotalField(breakdown map[string]map[string]interface{}, total_field string, component_fields []string) {
+	for _, alliance := range []string{"blue", "red"} {
+		total := 0
+		if _, ok := breakdown[alliance][total_field]; ok {
+			panic(fmt.Sprintf("field to calculate already exists: %s %s", alliance, total_field))
+		}
+		for _, k := range component_fields {
+			if v, ok := breakdown[alliance][k].(int); ok {
+				total += v
+			} else {
+				panic(fmt.Sprintf("component field not found or not integer: %s %s", alliance, k))
+			}
+		}
+		breakdown[alliance][total_field] = total
 	}
 }
