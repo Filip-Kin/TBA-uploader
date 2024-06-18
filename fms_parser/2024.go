@@ -19,9 +19,6 @@ type fmsScoreInfo2024 struct {
 	fouls  int
 	total  int
 	// year-specific:
-	// auto_charge_station   int
-	// teleop_charge_station int
-	// link                  int
 }
 
 func makeFmsScoreInfo2024() fmsScoreInfo2024 {
@@ -39,23 +36,11 @@ func makeExtraMatchAllianceInfo2024() extraMatchAllianceInfo2024 {
 }
 
 func addManualFields2024(breakdown map[string]interface{}, info fmsScoreInfo2024, extra extraMatchAllianceInfo2024, playoff bool) {
-	// breakdown["totalChargeStationPoints"] = info.auto_charge_station + info.teleop_charge_station
-
 	if _, ok := breakdown["adjustPoints"]; !ok {
 		// adjust should be negative when total = 0
 		breakdown["adjustPoints"] = info.total - info.auto - info.teleop - info.fouls
 	}
 }
-
-// const (
-// 	K2023_COMMUNITY_BOTTOM = "Bottom"
-// 	K2023_COMMUNITY_MIDDLE = "Middle"
-// 	K2023_COMMUNITY_TOP    = "Top"
-
-// 	K2023_COMMUNITY_NONE = "None"
-// 	K2023_COMMUNITY_CUBE = "Cube"
-// 	K2023_COMMUNITY_CONE = "Cone"
-// )
 
 // map FMS names (lowercase) to API names of basic integer fields
 var simpleIntFields2024 = map[string]string{
@@ -187,28 +172,6 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 			panic(fmt.Sprintf("no active match phase: %s", desc))
 		}
 	}
-	// matchPhaseWithEndGame := func() string {
-	// 	validateMatchPhase(match_phase)
-	// 	if match_phase == "teleop" {
-	// 		return "endGame"
-	// 	}
-	// 	return match_phase
-	// }
-
-	// var cur_community struct {
-	// 	blue *Community2024
-	// 	red  *Community2024
-	// }
-	// communityRowToKey := func(row_name string) string {
-	// 	if row_name == "bottom" {
-	// 		return K2024_COMMUNITY_BOTTOM
-	// 	} else if row_name == "middle" {
-	// 		return K2024_COMMUNITY_MIDDLE
-	// 	} else if row_name == "top" {
-	// 		return K2024_COMMUNITY_TOP
-	// 	}
-	// 	panic("invalid community row name: " + row_name)
-	// }
 
 	dom.Find("tr").Each(func(i int, s *goquery.Selection) {
 		defer func() {
@@ -228,15 +191,6 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 			return // continue
 		}
 
-		// if row_name == "community" {
-		// 	if cur_community.red != nil {
-		// 		panic("found community before end ")
-		// 	}
-		// 	cur_community.blue = makeCommunity2023()
-		// 	cur_community.red = makeCommunity2023()
-		// 	return // continue
-		// }
-
 		if columns.Length() == 3 {
 			if row_name == "leave" {
 				match_phase = "auto"
@@ -250,24 +204,6 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 			parseIntWrapper := func(s, alliance string) int {
 				return checkParseInt(s, alliance+" "+row_name)
 			}
-
-			// if cur_community.red != nil {
-			// 	cur_community.blue.parseCommunityRow(communityRowToKey(row_name), blue_cell)
-			// 	cur_community.red.parseCommunityRow(communityRowToKey(row_name), red_cell)
-
-			// 	if cur_community.red.isComplete() {
-			// 		api_field := match_phase + "Community"
-			// 		cur_community.blue.assignPiecesToBreakdown(breakdown["blue"], api_field)
-			// 		cur_community.red.assignPiecesToBreakdown(breakdown["red"], api_field)
-			// 		if match_phase == "teleop" {
-			// 			cur_community.blue.assignLinksToBreakdown(breakdown["blue"], "links")
-			// 			cur_community.red.assignLinksToBreakdown(breakdown["red"], "links")
-			// 		}
-			// 		cur_community.blue = nil
-			// 		cur_community.red = nil
-			// 	}
-			// 	return // continue
-			// }
 
 			// Handle each data row
 			if api_field, ok := simpleStringFields2024[row_name]; ok {
