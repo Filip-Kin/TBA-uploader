@@ -147,6 +147,14 @@ func assignBreakdownAllianceFieldsConst[T any](breakdowns map[string]map[string]
 	breakdowns["red"][field] = value
 }
 
+func incrementBreakdownAllianceFieldsBy(breakdowns map[string]map[string]interface{}, field string, values breakdownAllianceFields[int]) {
+	var old int
+	old, _ = breakdowns["blue"][field].(int)
+	breakdowns["blue"][field] = old + values.blue
+	old, _ = breakdowns["red"][field].(int)
+	breakdowns["red"][field] = old + values.red
+}
+
 type breakdownRobotFields[T any] struct {
 	blue []T
 	red  []T
