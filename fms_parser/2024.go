@@ -75,7 +75,7 @@ var totalIntFields2024 = map[string][]string{
 var simpleStringFields2024 = map[string]string{}
 
 var simpleIconFields2024 = map[string]string{
-	"coop button pressed": "coopNotePlayed", // TODO: verify
+	"coop button pressed": "coopertitionCriteriaMet",
 	"coopertition bonus":  "coopertitionBonusAchieved",
 	"ensemble":            "ensembleBonusAchieved",
 	"melody":              "melodyBonusAchieved",
@@ -85,6 +85,10 @@ var penaltyFields2024 = map[string]string{
 	"G206": "g206Penalty",
 	"G408": "g408Penalty",
 	"G424": "g424Penalty",
+}
+
+var duplicateFields2024 = map[string]string{
+	"coopNotePlayed": "coopertitionCriteriaMet",
 }
 
 var DEFAULT_BREAKDOWN_VALUES_2024 = map[string]any{}
@@ -309,6 +313,11 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 
 	for total_field, component_fields := range totalIntFields2024 {
 		assignTotalField(breakdown, total_field, component_fields)
+	}
+
+	for target_field, source_field := range duplicateFields2024 {
+		breakdown["blue"][target_field] = breakdown["blue"][source_field]
+		breakdown["red"][target_field] = breakdown["red"][source_field]
 	}
 
 	if config.EnabledExtraRps != nil {
