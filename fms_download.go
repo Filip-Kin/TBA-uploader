@@ -132,7 +132,7 @@ func downloadMatches(level int, folder string, new_only bool) ([]string, error) 
 			return
 		}
 		match_url = FMSConfig.FmsUrl + match_url
-		button := row.Find("button").First()
+		button := row.Find("a.btn-success, button").First() // link as of 2024
 		button_text := strings.Replace(button.Text(), " ", "", -1)
 		button_text = strings.Replace(button_text, "/", "-", -1)
 		filename, ok, err := downloadFile(matches_dir, button_text+".html", match_url, !new_only)

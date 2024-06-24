@@ -18,6 +18,7 @@ var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, erro
 	2019: parseHTMLtoJSON2019,
 	2022: parseHTMLtoJSON2022,
 	2023: parseHTMLtoJSON2023,
+	2024: parseHTMLtoJSON2024,
 }
 
 func ParseHTMLtoJSON(year int, filename string, config FMSParseConfig) (map[string]interface{}, error) {
