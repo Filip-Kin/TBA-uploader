@@ -96,6 +96,22 @@ var stageFields2024 = map[string]string{
 	"spotlit":      "mic",
 }
 
+type scoreThresholds2024 struct {
+	EnsembleBonusOnStageRobotsThreshold int `json:"ensembleBonusOnStageRobotsThreshold"`
+	EnsembleBonusStagePointsThreshold   int `json:"ensembleBonusStagePointsThreshold"`
+	MelodyBonusThresholdCoop            int `json:"melodyBonusThresholdCoop"`
+	MelodyBonusThresholdNonCoop         int `json:"melodyBonusThresholdNonCoop"`
+}
+
+func makeDefaultScoreThresholds2024() scoreThresholds2024 {
+	return scoreThresholds2024{
+		EnsembleBonusOnStageRobotsThreshold: 2,
+		EnsembleBonusStagePointsThreshold:   10,
+		MelodyBonusThresholdCoop:            15,
+		MelodyBonusThresholdNonCoop:         18,
+	}
+}
+
 func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]interface{}, error) {
 	//////////////////////////////////////////////////
 	// Parse html from FMS into TBA-compatible JSON //
@@ -154,6 +170,13 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 	}{
 		makeFmsScoreInfo2024(),
 		makeFmsScoreInfo2024(),
+	}
+
+	thresholds := makeDefaultScoreThresholds2024()
+	// TODO: read thresholds from request
+	err = assignBreakdownFieldsFromJsonStruct[scoreThresholds2024](breakdown, thresholds)
+	if err != nil {
+		panic(fmt.Sprintf("could not assign thresholds: %v", err))
 	}
 
 	parse_errors := make([]string, 0)
@@ -311,10 +334,21 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 		assignTotalField(breakdown, total_field, component_fields)
 	}
 
+	// fields determined by coopertition:
 	for _, alliance := range []string{"blue", "red"} {
 		if coop_button_field, ok := breakdown[alliance]["coopNotePlayed"]; ok {
 			if coop_button, ok := coop_button_field.(bool); ok {
 				breakdown[alliance]["coopertitionCriteriaMet"] = coop_button && !config.Playoff
+			}
+		}
+
+		if coop_achieved_field, ok := breakdown[alliance]["coopertitionBonusAchieved"]; ok {
+			if coop_achieved, ok := coop_achieved_field.(bool); ok {
+				if coop_achieved {
+					breakdown[alliance]["melodyBonusThreshold"] = thresholds.MelodyBonusThresholdCoop
+				} else {
+					breakdown[alliance]["melodyBonusThreshold"] = thresholds.MelodyBonusThresholdNonCoop
+				}
 			}
 		}
 	}

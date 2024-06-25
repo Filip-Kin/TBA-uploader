@@ -1,6 +1,7 @@
 package fms_parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -277,4 +278,24 @@ func assignTotalField(breakdown map[string]map[string]interface{}, total_field s
 		}
 		breakdown[alliance][total_field] = total
 	}
+}
+
+func assignBreakdownFieldsFromJsonStruct[T any](breakdowns map[string]map[string]interface{}, object T) (err error) {
+	json_str, err := json.Marshal(object)
+	if err != nil {
+		return
+	}
+
+	json_map := make(map[string]interface{})
+	err = json.Unmarshal(json_str, &json_map)
+	if err != nil {
+		return
+	}
+
+	for _, alliance := range []string{"blue", "red"} {
+		for k, v := range json_map {
+			breakdowns[alliance][k] = v
+		}
+	}
+	return nil
 }
