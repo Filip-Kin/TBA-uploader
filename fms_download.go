@@ -182,11 +182,16 @@ func downloadAllMatches(level int, folder string) ([]string, error) {
 func downloadRankings(level int, folder string) ([]byte, error) {
 	ranking_path := getRankingDownloadPath(level, folder)
 	os.MkdirAll(ranking_path, os.ModePerm)
-	request, err := http.NewRequest("GET", FMSConfig.FmsUrl+"/Pit/GetData", nil)
+
+	// event ID, then cache ID - both can be arbitrary. Appears that only changing the event ID bypasses the cache.
+	// for sanity, still allow caching for 30sec.
+	cache_key := time.Now().Unix() / 30
+	cache_key_uuid := fmt.Sprintf("00000000-0000-0000-%04x-%012x", (cache_key>>(12*4))&0xffff, cache_key&0xffffffffffff)
+
+	request, err := http.NewRequest("GET", FMSConfig.FmsUrl+"/"+cache_key_uuid+"/refreshpiteventqualificationmodel/00000000-0000-0000-0000-000000000000", nil)
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Add("Referer", FMSConfig.FmsUrl+"/Pit/Qual")
 	client := http.Client{Timeout: 5 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
