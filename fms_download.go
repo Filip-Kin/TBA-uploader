@@ -227,7 +227,7 @@ func makeReportRequest(report_action, report_type string, headers map[string]str
 		"reportServerUrl": "",
 		"processingMode":  "local",
 		"locale":          "en-US",
-		"CustomData":      string(custom_data_raw),
+		"customData":      string(custom_data_raw),
 	}
 	if body_fields != nil {
 		for field, value := range body_fields {
