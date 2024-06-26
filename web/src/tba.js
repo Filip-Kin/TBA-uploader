@@ -63,7 +63,11 @@ const rankingBreakdownSources = {
         'Avg Auto': RankingReducerAverage('autoPoints'),
     },
     2024: {
-        // TODO
+        'Ranking Score': RankingReducerAverage('rp'),
+        'Avg Coop': RankingReducerAverage(['coopertitionBonusAchieved']),
+        'Avg Match': RankingReducerAverage(['totalPoints', '-foulPoints']),
+        'Avg Auto': RankingReducerAverage('autoPoints'),
+        'Avg Stage': RankingReducerAverage('endGameTotalStagePoints'),
     },
 };
 
