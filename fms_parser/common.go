@@ -65,6 +65,9 @@ var extraAllianceInfoCtors = map[int]func() ExtraMatchAllianceInfo{
 	2023: func() ExtraMatchAllianceInfo {
 		return makeExtraMatchAllianceInfo2023()
 	},
+	2024: func() ExtraMatchAllianceInfo {
+		return makeExtraMatchAllianceInfo2024()
+	},
 }
 
 func MakeExtraMatchInfo(year int) (ExtraMatchInfo, error) {
