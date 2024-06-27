@@ -88,7 +88,7 @@ report_uuids = set()
 @app.route('/Reports/PostReportAction', methods=['POST'])
 def get_report():
     body = flask.request.get_json()
-    report_type = json.loads(body['CustomData'])[0]['reportType']
+    report_type = json.loads(body['customData'])[0]['reportType']
     validate_dict('headers', flask.request.headers, {
         'Content-Type': 'application/json; charset=UTF-8',
         'Origin': 'http://10.0.100.5',

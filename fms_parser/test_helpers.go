@@ -29,11 +29,14 @@ type testTbaMatchResult struct {
 	} `json:"score_breakdown"`
 }
 
+type testMatchFilterFunc func(*testTbaMatchResult)
+
 func testParseSingleMatch(
 	t *testing.T,
 	parser func(filename string, config FMSParseConfig) (map[string]interface{}, error),
 	fms_html_path string,
 	tba_json_path string,
+	filters ...testMatchFilterFunc,
 ) {
 	json_contents, err := ioutil.ReadFile(tba_json_path)
 	if err != nil {
@@ -59,6 +62,11 @@ func testParseSingleMatch(
 		fmt.Printf("%s", parsed_marshaled)
 	}
 
+	for _, filter := range filters {
+		filter(&tba_result)
+		filter(&parsed_result)
+	}
+
 	assert.Equalf(t, tba_result.Alliances.Blue["team_keys"], parsed_result.Alliances.Blue["teams"], "blue team keys of %s", fms_html_path)
 	assert.Equalf(t, tba_result.Alliances.Red["team_keys"], parsed_result.Alliances.Red["teams"], "red team keys of %s", fms_html_path)
 
@@ -69,6 +77,7 @@ func testParseMatchDir(
 	t *testing.T,
 	parser func(filename string, config FMSParseConfig) (map[string]interface{}, error),
 	dirname string,
+	filters ...testMatchFilterFunc,
 ) {
 	all_files, err := ioutil.ReadDir(dirname)
 	if err != nil {
@@ -83,7 +92,17 @@ func testParseMatchDir(
 				parser,
 				path.Join(dirname, file.Name()),
 				path.Join(dirname, strings.Replace(file.Name(), ".html", ".json", 1)),
+				filters...,
 			)
+		}
+	}
+}
+
+func filterTestMatchDeleteFields(fields ...string) testMatchFilterFunc {
+	return func(match *testTbaMatchResult) {
+		for _, field := range fields {
+			delete(match.ScoreBreakdown.Red, field)
+			delete(match.ScoreBreakdown.Blue, field)
 		}
 	}
 }

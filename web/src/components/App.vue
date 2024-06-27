@@ -1507,6 +1507,7 @@ const EXTRA_FIELDS = {
     },
     2022: {},
     2023: {},
+    2024: {},
 };
 
 export default {
@@ -2647,33 +2648,38 @@ export default {
             this.hideEditMatch();
         },
 
-        uploadRankingsFromFMS: function() {
+        uploadRankingsFromFMS: async function() {
             this.rankingsError = '';
             this.inUploadRankings = true;
             const params = {
                 event: this.selectedEvent,
                 level: this.matchLevel,
             };
-            $.getJSON('/api/rankings/fetch', params, function(data) {
-                var rankings = ((data && data.qualRanks) || []).map(tba.convertToTBARankings[this.eventYear]);
+            try {
+                let data = await $.getJSON('/api/rankings/fetch', params);
+                let rankings = Array.isArray(data) ? data : ((data && data.rankings) || []).map(tba.convertToTBARankings[this.eventYear]);
                 if (!rankings || !rankings.length) {
                     this.rankingsError = 'No rankings available from FMS';
                     this.inUploadRankings = false;
                     return;
                 }
 
-                sendApiRequest('/api/rankings/upload', this.selectedEvent, {
-                    breakdowns: tba.RANKING_NAMES[this.eventYear],
-                    rankings: rankings,
-                }).fail(function(res) {
-                    this.rankingsError = res.responseText;
-                }.bind(this)).always(function() {
-                    this.inUploadRankings = false;
-                }.bind(this));
-            }.bind(this)).fail(function(res) {
-                this.rankingsError = 'fetch failed: ' + res.responseText;
+                try {
+                    await sendApiRequest('/api/rankings/upload', this.selectedEvent, {
+                        breakdowns: tba.RANKING_NAMES[this.eventYear],
+                        rankings: rankings,
+                    });
+                }
+                catch (e) {
+                    this.rankingsError = 'upload failed: ' + utils.parseErrorText(e);
+                }
+            }
+            catch (e) {
+                this.rankingsError = 'fetch failed: ' + utils.parseErrorText(e);
+            }
+            finally {
                 this.inUploadRankings = false;
-            }.bind(this));
+            }
         },
         uploadRankingsFromTBA: async function() {
             this.rankingsError = '';

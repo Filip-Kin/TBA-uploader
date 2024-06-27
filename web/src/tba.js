@@ -62,6 +62,13 @@ const rankingBreakdownSources = {
         'Avg Charge Station': RankingReducerAverage('totalChargeStationPoints'),
         'Avg Auto': RankingReducerAverage('autoPoints'),
     },
+    2024: {
+        'Ranking Score': RankingReducerAverage('rp'),
+        'Avg Coop': RankingReducerAverage(['coopertitionBonusAchieved']),
+        'Avg Match': RankingReducerAverage(['totalPoints', '-foulPoints']),
+        'Avg Auto': RankingReducerAverage('autoPoints'),
+        'Avg Stage': RankingReducerAverage('endGameTotalStagePoints'),
+    },
 };
 
 const tba = Object.freeze({
@@ -121,6 +128,15 @@ const tba = Object.freeze({
                 "Avg Auto": r.sort4,
             });
         },
+        2024: function(r) {
+            return Object.assign(tba.convertToTBARankings.common(r), {
+                "Ranking Score": r.sort1,
+                "Avg Coop": r.sort2,
+                "Avg Match": r.sort3,
+                "Avg Auto": r.sort4,
+                "Avg Stage": r.sort5,
+            });
+        },
     }),
 
     RANKING_NAMES: Object.freeze({
@@ -149,6 +165,13 @@ const tba = Object.freeze({
             "Avg Match",
             "Avg Charge Station",
             "Avg Auto",
+        ],
+        2024: [
+            "Ranking Score",
+            "Avg Coop",
+            "Avg Match",
+            "Avg Auto",
+            "Avg Stage",
         ],
     }),
 

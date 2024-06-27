@@ -1,6 +1,7 @@
 package fms_parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -18,6 +19,7 @@ var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, erro
 	2019: parseHTMLtoJSON2019,
 	2022: parseHTMLtoJSON2022,
 	2023: parseHTMLtoJSON2023,
+	2024: parseHTMLtoJSON2024,
 }
 
 func ParseHTMLtoJSON(year int, filename string, config FMSParseConfig) (map[string]interface{}, error) {
@@ -62,6 +64,9 @@ var extraAllianceInfoCtors = map[int]func() ExtraMatchAllianceInfo{
 	},
 	2023: func() ExtraMatchAllianceInfo {
 		return makeExtraMatchAllianceInfo2023()
+	},
+	2024: func() ExtraMatchAllianceInfo {
+		return makeExtraMatchAllianceInfo2024()
 	},
 }
 
@@ -259,4 +264,42 @@ func assignBreakdownExtraRps(breakdowns map[string]map[string]interface{}, enabl
 			breakdowns[color]["rp"] = existing_rp + alliance_extra_rp
 		}
 	}
+}
+
+func assignTotalField(breakdown map[string]map[string]interface{}, total_field string, component_fields []string) (err error) {
+	for _, alliance := range []string{"blue", "red"} {
+		total := 0
+		if _, ok := breakdown[alliance][total_field]; ok {
+			return fmt.Errorf("field to calculate already exists: %s %s", alliance, total_field)
+		}
+		for _, k := range component_fields {
+			if v, ok := breakdown[alliance][k].(int); ok {
+				total += v
+			} else {
+				return fmt.Errorf("component field not found or not integer: %s %s", alliance, k)
+			}
+		}
+		breakdown[alliance][total_field] = total
+	}
+	return nil
+}
+
+func assignBreakdownFieldsFromJsonStruct[T any](breakdowns map[string]map[string]interface{}, object T) (err error) {
+	json_str, err := json.Marshal(object)
+	if err != nil {
+		return
+	}
+
+	json_map := make(map[string]interface{})
+	err = json.Unmarshal(json_str, &json_map)
+	if err != nil {
+		return
+	}
+
+	for _, alliance := range []string{"blue", "red"} {
+		for k, v := range json_map {
+			breakdowns[alliance][k] = v
+		}
+	}
+	return nil
 }
