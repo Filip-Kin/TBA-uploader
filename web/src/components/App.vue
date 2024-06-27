@@ -230,6 +230,7 @@
                         />
                         <div
                             v-for="(webcast, i) in eventExtras[selectedEvent].webcasts"
+                            :key="'webcast'+i"
                             class="input-group"
                         >
                             <b-button-close
