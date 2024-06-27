@@ -331,7 +331,11 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 	})
 
 	for total_field, component_fields := range totalIntFields2024 {
-		assignTotalField(breakdown, total_field, component_fields)
+		err := assignTotalField(breakdown, total_field, component_fields)
+		if err != nil {
+			fmt.Printf("Parse error in %s: assignTotalField: %v\n", filename, err)
+			parse_errors = append(parse_errors, fmt.Sprintf("assignTotalField: %v", err))
+		}
 	}
 
 	// fields determined by coopertition:

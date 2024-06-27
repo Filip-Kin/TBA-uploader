@@ -266,21 +266,22 @@ func assignBreakdownExtraRps(breakdowns map[string]map[string]interface{}, enabl
 	}
 }
 
-func assignTotalField(breakdown map[string]map[string]interface{}, total_field string, component_fields []string) {
+func assignTotalField(breakdown map[string]map[string]interface{}, total_field string, component_fields []string) (err error) {
 	for _, alliance := range []string{"blue", "red"} {
 		total := 0
 		if _, ok := breakdown[alliance][total_field]; ok {
-			panic(fmt.Sprintf("field to calculate already exists: %s %s", alliance, total_field))
+			return fmt.Errorf("field to calculate already exists: %s %s", alliance, total_field)
 		}
 		for _, k := range component_fields {
 			if v, ok := breakdown[alliance][k].(int); ok {
 				total += v
 			} else {
-				panic(fmt.Sprintf("component field not found or not integer: %s %s", alliance, k))
+				return fmt.Errorf("component field not found or not integer: %s %s", alliance, k)
 			}
 		}
 		breakdown[alliance][total_field] = total
 	}
+	return nil
 }
 
 func assignBreakdownFieldsFromJsonStruct[T any](breakdowns map[string]map[string]interface{}, object T) (err error) {
