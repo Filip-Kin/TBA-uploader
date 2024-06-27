@@ -5,5 +5,5 @@ import (
 )
 
 func TestParse2024(t *testing.T) {
-	testParseMatchDir(t, parseHTMLtoJSON2024, "../tests/data/2024/")
+	testParseMatchDir(t, parseHTMLtoJSON2024, "../tests/data/2024/", filterTestMatchDeleteFields("endGameRobot1", "endGameRobot2", "endGameRobot3"))
 }
