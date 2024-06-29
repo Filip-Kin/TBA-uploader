@@ -238,34 +238,29 @@
                                 title="Remove"
                                 @click="webcastsRemoveIndex(i)"
                             />
-                            <form
-                                v-if="'channel' in webcast"
-                                class="form-inline mb-2"
-                            >
-                                <label>
+                            <form class="form-inline mb-2">
+                                <label v-if="'channel' in webcast">
                                     Channel:
                                     <b-form-input
                                         v-model="webcast.channel"
                                         size="50"
                                     />
                                 </label>
-                                <label>
+                                <label v-if="'channel' in webcast">
                                     <b-form-select
                                         v-model="webcast.type"
                                         :options="WEBCAST_TYPES"
                                     />
                                 </label>
-                            </form>
-                            <form
-                                v-else
-                                class="form-inline mb-2"
-                            >
-                                <label>
+                                <label v-if="!('channel' in webcast)">
                                     URL:
                                     <b-form-input
                                         v-model="webcast.url"
                                         style="width: 25em"
                                     />
+                                </label>
+                                <label>
+                                    <b-form-select v-model="webcast.date" :options="webcastDateOptions"/>
                                 </label>
                             </form>
                         </div>
@@ -1736,6 +1731,15 @@ export default {
         isMatchRunning() {
             return this.lastFieldState && utils.isFieldStateInMatch(this.lastFieldState);
         },
+        webcastDateOptions() {
+            const opts = [{value: null, text: 'All Dates'}];
+            const end_date = new Date(this.tbaEventData.end_date);
+            for (let d = new Date(this.tbaEventData.start_date); d <= end_date; d.setDate(d.getDate() + 1)) {
+                const dateString = d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2);
+                opts.push({value: dateString, text: dateString});
+            }
+            return opts;
+        },
     },
     watch: {
         selectedTab: function(tab) {
@@ -2061,7 +2065,10 @@ export default {
             this.inEventRequest = true;
             try {
                 await sendApiRequest('/api/info/upload', this.selectedEvent, {
-                    webcasts: this.eventExtras[this.selectedEvent].webcasts,
+                    webcasts: this.eventExtras[this.selectedEvent].webcasts.map((webcast) => ({
+                        ...webcast,
+                        date: webcast.date || undefined,
+                    })),
                 });
             }
             catch (e) {
@@ -2080,6 +2087,9 @@ export default {
                 if (!webcasts.length) {
                     this.webcastError = 'No webcasts on TBA (1min caching may apply)';
                     return;
+                }
+                for (let webcast of webcasts) {
+                    webcast.date = webcast.date || null;
                 }
                 this.eventExtras[this.selectedEvent].webcasts = webcasts;
             }
