@@ -32,6 +32,10 @@ func main() {
 	if err != nil {
 		log.Printf("WARNING: path normalization of \"%s\" failed: %s\n", *data_folder, err)
 	}
+	err = os.MkdirAll(FMSConfig.DataFolder, os.ModePerm)
+	if err != nil {
+		log.Fatalf("ERROR: cannot create data folder: %s\n", err)
+	}
 
 	log_path := filepath.Join(FMSConfig.DataFolder, "tba-uploader.log")
 	log_file, err := os.OpenFile(log_path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, os.ModePerm)
