@@ -1616,6 +1616,7 @@ export default {
         autoAVStopTimer: null,
 
         lastMatchPlayed: [0, 0, 0], // match, play, level
+        recentMatchTbaKeys: [],
 
         alliances: STORED_ALLIANCES,
         alliancesFmsTabOrder: true,
@@ -1794,6 +1795,13 @@ export default {
                 if (data.match_play && Array.isArray(data.match_play) && data.match_play.length == 3 &&
                     utils.isFieldStateInMatchLoaded(data.field_state)) {
                     this.lastMatchPlayed = data.match_play;
+
+                    const lastMatchKey = (data.match_play[2] == MATCH_LEVEL.QUAL)
+                        ? 'qm' + data.match_play[0]
+                        : Schedule.getTBAMatchKey(Schedule.getTBAPlayoffCode(this.eventExtras[this.selectedEvent].playoff_type, data.match_play[0]));
+                    if (!this.recentMatchTbaKeys.includes(lastMatchKey)) {
+                        this.recentMatchTbaKeys.push(lastMatchKey);
+                    }
                 }
             }
         });
@@ -2786,11 +2794,15 @@ export default {
                 this.inVideoRequest = false;
             }.bind(this))
             .then(function(matches) {
+                matches = [...matches, ...this.recentMatchTbaKeys.map(key => ({
+                    key: this.selectedEvent + '_' + key,
+                    force: true,
+                }))];
                 matches.forEach(function(match) {
                     var key = match.key.split('_')[1];
-                    if (match.alliances && match.alliances.blue && match.alliances.blue.score != -1) {
+                    if (match.force || (match.alliances && match.alliances.blue && match.alliances.blue.score != -1)) {
                         var v = this.videos[key] || {};
-                        v.tba = match.videos.filter(function(cv) {
+                        v.tba = (match.videos || []).filter(function(cv) {
                             return cv.type == 'youtube';
                         }).map(function(cv) {
                             return cv.key;
