@@ -264,7 +264,7 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 		files, err = downloadNewMatches(level, r.URL.Query().Get("event"))
 	}
 	if err != nil {
-		apiPanicInternal("match downloaded failed: %s", err)
+		apiPanicInternal("match download failed: %s", err)
 	}
 
 	if files != nil {
