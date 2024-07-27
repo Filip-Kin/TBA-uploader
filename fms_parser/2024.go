@@ -68,7 +68,7 @@ var simpleIntMatchPhaseFields2024 = map[string]string{
 
 var totalIntFields2024 = map[string][]string{
 	"autoTotalNotePoints":     {"autoAmpNotePoints", "autoSpeakerNotePoints"},
-	"teleopTotalNotePoints":   {"teleopAmpNotePoints", "teleopSpeakerNotePoints"},
+	"teleopTotalNotePoints":   {"teleopAmpNotePoints", "teleopSpeakerNotePoints", "teleopSpeakerNoteAmplifiedPoints"},
 	"endGameTotalStagePoints": {"endGameParkPoints", "endGameOnStagePoints", "endGameSpotLightBonusPoints", "endGameHarmonyPoints", "endGameNoteInTrapPoints"},
 }
 
