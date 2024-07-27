@@ -60,15 +60,17 @@ var simpleIntFields2024 = map[string]string{
 // Map FMS names (lowercase) to API name suffixes of basic integer fields.
 // The match phase ("auto" or "teleop") will be prepended to the API names as appropriate.
 var simpleIntMatchPhaseFields2024 = map[string]string{
-	"amp note count":      "AmpNoteCount",
-	"amp note points":     "AmpNotePoints",
-	"speaker note count":  "SpeakerNoteCount",
-	"speaker note points": "SpeakerNotePoints",
+	"amp note count":                   "AmpNoteCount",
+	"amp note points":                  "AmpNotePoints",
+	"speaker note count":               "SpeakerNoteCount",
+	"speaker note un-amplified count":  "SpeakerNoteCount",
+	"speaker note points":              "SpeakerNotePoints",
+	"speaker note un-amplified points": "SpeakerNotePoints",
 }
 
 var totalIntFields2024 = map[string][]string{
 	"autoTotalNotePoints":     {"autoAmpNotePoints", "autoSpeakerNotePoints"},
-	"teleopTotalNotePoints":   {"teleopAmpNotePoints", "teleopSpeakerNotePoints"},
+	"teleopTotalNotePoints":   {"teleopAmpNotePoints", "teleopSpeakerNotePoints", "teleopSpeakerNoteAmplifiedPoints"},
 	"endGameTotalStagePoints": {"endGameParkPoints", "endGameOnStagePoints", "endGameSpotLightBonusPoints", "endGameHarmonyPoints", "endGameNoteInTrapPoints"},
 }
 
@@ -247,9 +249,13 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 					red:  checkParseInt(red_text, "red "+api_field),
 				})
 			} else if api_field, ok := simpleIconFields2024[row_name]; ok {
+				success_icon := "fa-check"
+				if blue_cell.AddSelection(red_cell).Find("i.fa-handshake").Length() >= 1 {
+					success_icon = "fa-handshake"
+				}
 				assignBreakdownAllianceFields[bool](breakdown, api_field, identity_fn[bool], breakdownAllianceFields[bool]{
-					blue: iconToBool(blue_cell.Find("i"), "fa-check", "fa-times"),
-					red:  iconToBool(red_cell.Find("i"), "fa-check", "fa-times"),
+					blue: iconToBool(blue_cell.Find("i"), success_icon, "fa-times"),
+					red:  iconToBool(red_cell.Find("i"), success_icon, "fa-times"),
 				})
 			} else if row_name == "teams" {
 				assignTbaTeams(alliances, breakdownAllianceFields[*goquery.Selection]{
@@ -266,10 +272,24 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 				scoreInfo.blue.total = blue_score
 				scoreInfo.red.total = red_score
 			} else if row_name == "ranking points" {
-				blue_rp := checkParseInt(blue_text, "blue ranking points")
-				red_rp := checkParseInt(red_text, "red ranking points")
-				breakdown["blue"]["rp"] = blue_rp
-				breakdown["red"]["rp"] = red_rp
+				for _, alliance := range []string{"blue", "red"} {
+					cell := blue_cell
+					if alliance == "red" {
+						cell = red_cell
+					}
+					rp, err := countRankingPoints(cell)
+					if err != nil {
+						panic(fmt.Errorf("%s ranking points: %s", alliance, err))
+					}
+
+					breakdown[alliance]["rp"] = rp
+
+					if cell.Find("div.col-md-3").Length() >= 4 {
+						// RPs are icons
+						breakdown[alliance]["melodyBonusAchieved"] = cell.Find("i.fa-music").Length() >= 1
+						breakdown[alliance]["ensembleBonusAchieved"] = cell.Find("i.fa-users").Length() >= 1
+					}
+				}
 			} else if row_name == "autonomous points" {
 				blue_points := checkParseInt(blue_text, "blue "+row_name)
 				red_points := checkParseInt(red_text, "red "+row_name)

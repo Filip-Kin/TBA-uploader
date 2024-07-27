@@ -3,6 +3,7 @@ package fms_parser
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -302,4 +303,18 @@ func assignBreakdownFieldsFromJsonStruct[T any](breakdowns map[string]map[string
 		}
 	}
 	return nil
+}
+
+func countRankingPoints(cell *goquery.Selection) (int, error) {
+	text := strings.TrimSpace(cell.Text())
+	n, err := strconv.ParseInt(text, 10, 0)
+	if err == nil {
+		return int(n), nil
+	}
+
+	if cell.Find("div.col-md-3").Length() >= 4 {
+		return cell.Find("i.fas").Length(), nil
+	}
+
+	return 0, fmt.Errorf("unrecognized RP format")
 }
