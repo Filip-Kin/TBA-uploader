@@ -19,6 +19,7 @@ type fmsScoreInfo2024 struct {
 	fouls  int
 	total  int
 	// year-specific:
+	baseRP int // win-loss-tie RP only
 }
 
 func makeFmsScoreInfo2024() fmsScoreInfo2024 {
@@ -39,6 +40,14 @@ func addManualFields2024(breakdown map[string]interface{}, info fmsScoreInfo2024
 	if _, ok := breakdown["adjustPoints"]; !ok {
 		// adjust should be negative when total = 0
 		breakdown["adjustPoints"] = info.total - info.auto - info.teleop - info.fouls
+	}
+
+	if !playoff {
+		if _, ok := breakdown["rp"]; !ok {
+			// assume this is a practice match
+			// TODO: check for presence of the bonus fields (these are not present in practice matches anyway)
+			breakdown["rp"] = info.baseRP
+		}
 	}
 }
 
@@ -271,6 +280,16 @@ func parseHTMLtoJSON2024(filename string, config FMSParseConfig) (map[string]int
 				alliances["red"]["score"] = red_score
 				scoreInfo.blue.total = blue_score
 				scoreInfo.red.total = red_score
+				if blue_score == red_score {
+					scoreInfo.blue.baseRP = 1
+					scoreInfo.red.baseRP = 1
+				} else if blue_score > red_score {
+					scoreInfo.blue.baseRP = 2
+					scoreInfo.red.baseRP = 0
+				} else {
+					scoreInfo.blue.baseRP = 0
+					scoreInfo.red.baseRP = 2
+				}
 			} else if row_name == "ranking points" {
 				for _, alliance := range []string{"blue", "red"} {
 					cell := blue_cell
