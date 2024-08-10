@@ -7,9 +7,16 @@ import (
 )
 
 func testBracket(t *testing.T, bracket Bracket, bracket_type int, name string) {
+	max_i := 0
 	for i, expected_code := range bracket {
 		code := GetPlayoffCode(bracket_type, i)
 		assert.Equalf(t, expected_code, code, "playoff %d of %s", i, name)
+		if i > max_i {
+			max_i = i
+		}
+	}
+	for i := max_i + 1; i <= max_i*2; i++ {
+		assert.Equalf(t, MatchCode{}, GetPlayoffCode(bracket_type, i), "playoff %d of %s: unexpected match past end of bracket", i, name)
 	}
 }
 
@@ -40,7 +47,6 @@ var playoff_codes_8_bracket = Bracket{
 	22: {Level: "f", Set: 1, Match: 4},
 	23: {Level: "f", Set: 1, Match: 5},
 	24: {Level: "f", Set: 1, Match: 6},
-	25: {},
 }
 
 func TestPlayoffCodes8Bracket(t *testing.T) {
@@ -70,7 +76,6 @@ var playoff_codes_6_round_robin = Bracket{
 	19: {Level: "f", Set: 1, Match: 4},
 	20: {Level: "f", Set: 1, Match: 5},
 	21: {Level: "f", Set: 1, Match: 6},
-	22: {},
 }
 
 func TestPlayoffCodes6RoundRobin(t *testing.T) {
@@ -98,7 +103,6 @@ var playoff_codes_8_double_elim = Bracket{
 	17: {Level: "f", Set: 1, Match: 4},
 	18: {Level: "f", Set: 1, Match: 5},
 	19: {Level: "f", Set: 1, Match: 6},
-	20: {},
 }
 
 func TestPlayoffCodes8DoubleElim(t *testing.T) {
@@ -118,7 +122,6 @@ var playoff_codes_4_double_elim = Bracket{
 	9:  {Level: "f", Set: 1, Match: 4},
 	10: {Level: "f", Set: 1, Match: 5},
 	11: {Level: "f", Set: 1, Match: 6},
-	12: {},
 }
 
 func TestPlayoffCodes4DoubleElim(t *testing.T) {
@@ -165,7 +168,6 @@ var playoff_codes_custom_kas = Bracket{
 	22: {Level: "f", Set: 1, Match: 4},
 	23: {Level: "f", Set: 1, Match: 5},
 	24: {Level: "f", Set: 1, Match: 6},
-	25: {},
 }
 
 func TestPlayoffCodesCustomKAS(t *testing.T) {
