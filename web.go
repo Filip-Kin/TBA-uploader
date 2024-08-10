@@ -301,7 +301,19 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			is_playoff := (level == MATCH_LEVEL_PLAYOFF)
+			effective_level := level
+			effective_match_number := match_number
+			if level == MATCH_LEVEL_PRACTICE {
+				if practice_settings.FirstQual >= 1 && match_number >= practice_settings.FirstQual && (practice_settings.FirstPlayoff < practice_settings.FirstQual || match_number < practice_settings.FirstPlayoff) {
+					effective_level = MATCH_LEVEL_QUAL
+					effective_match_number = match_number - practice_settings.FirstQual + 1
+				} else if practice_settings.FirstPlayoff >= 1 && match_number >= practice_settings.FirstPlayoff && (practice_settings.FirstQual < practice_settings.FirstPlayoff || match_number < practice_settings.FirstQual) {
+					effective_level = MATCH_LEVEL_PLAYOFF
+					effective_match_number = match_number - practice_settings.FirstPlayoff + 1
+				}
+			}
+
+			is_playoff := (effective_level == MATCH_LEVEL_PLAYOFF)
 			if extra_info.MatchCodeOverride != nil {
 				is_playoff = (extra_info.MatchCodeOverride.Level != "qm")
 			}
@@ -325,18 +337,6 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
-				}
-			}
-
-			effective_level := level
-			effective_match_number := match_number
-			if level == MATCH_LEVEL_PRACTICE {
-				if practice_settings.FirstQual >= 1 && match_number >= practice_settings.FirstQual && (practice_settings.FirstPlayoff < practice_settings.FirstQual || match_number < practice_settings.FirstPlayoff) {
-					effective_level = MATCH_LEVEL_QUAL
-					effective_match_number = match_number - practice_settings.FirstQual + 1
-				} else if practice_settings.FirstPlayoff >= 1 && match_number >= practice_settings.FirstPlayoff && (practice_settings.FirstQual < practice_settings.FirstPlayoff || match_number < practice_settings.FirstQual) {
-					effective_level = MATCH_LEVEL_PLAYOFF
-					effective_match_number = match_number - practice_settings.FirstPlayoff + 1
 				}
 			}
 
