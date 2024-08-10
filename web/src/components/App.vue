@@ -322,17 +322,6 @@
                             class="form-inline"
                         >
                             <label>
-                                <!-- <b-form-checkbox
-                                    :value="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
-                                    @change="practiceSettingToggle('first_qual', $event)"
-                                >Enable qualification matches</b-form-checkbox>
-                                <span v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]">&nbsp;starting at practice match #</span>
-                                <b-form-input
-                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
-                                    v-model="eventExtras[selectedEvent].practice_settings.first_qual"
-                                    type="number"
-                                    number
-                                /> -->
                                 Enable qualification matches starting at practice match #
                                 <b-form-input
                                     v-model="eventExtras[selectedEvent].practice_settings.first_qual"
@@ -353,17 +342,6 @@
                             class="form-inline"
                         >
                             <label>
-                                <!-- <b-form-checkbox
-                                    :value="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
-                                    @change="practiceSettingToggle('first_qual', $event)"
-                                >Enable qualification matches</b-form-checkbox>
-                                <span v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]">&nbsp;starting at practice match #</span>
-                                <b-form-input
-                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
-                                    v-model="eventExtras[selectedEvent].practice_settings.first_qual"
-                                    type="number"
-                                    number
-                                /> -->
                                 Enable playoff matches starting at practice match #
                                 <b-form-input
                                     v-model="eventExtras[selectedEvent].practice_settings.first_playoff"
@@ -1768,13 +1746,6 @@ export default {
         anyEnabledExtraRps: function() {
             return this.enabledExtraRps.find(Boolean);
         },
-        practiceMatchPlayEnabled: function() {
-            const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].practice_settings;
-            if (settings) {
-                return settings.first_qual >= 1 || settings.first_playoff >= 1;
-            }
-            return false;
-        },
         practiceSettingsSanitized: function() {
             const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].practice_settings;
             if (settings) {
@@ -1784,6 +1755,13 @@ export default {
                 };
             }
             return {...DEFAULT_PRACTICE_SETTINGS};
+        },
+        practiceMatchPlayEnabled: function() {
+            const settings = this.practiceSettingsSanitized;
+            if (settings) {
+                return settings.first_qual >= 1 || settings.first_playoff >= 1;
+            }
+            return false;
         },
         practiceEnabledLevels: function() {
             const settings = this.practiceSettingsSanitized;
@@ -2204,15 +2182,6 @@ export default {
             }
             finally {
                 this.inEventRequest = false;
-            }
-        },
-
-        practiceSettingToggle(key, value) {
-            if (key == 'first_qual' || key == 'first_playoff') {
-                this.eventExtras[this.selectedEvent].practice_settings[key] = value ? 1 : -1;
-            }
-            else {
-                throw 'unhandled: ' + key;
             }
         },
 
