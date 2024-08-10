@@ -2400,7 +2400,7 @@ export default {
                     level: this.matchLevel,
                     playoff_type: this.eventPlayoffType,
                     enabled_extra_rps: this.enabledExtraRps.join(','),
-                    practice_settings: this.practiceSettingsSanitized,
+                    practice_settings: JSON.stringify(this.practiceSettingsSanitized),
                     all: all ? '1' : '',
                 });
                 this.pendingMatches = JSON.parse(data);

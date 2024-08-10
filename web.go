@@ -29,6 +29,11 @@ type APIError struct {
 	message string
 }
 
+type PracticeSettings struct {
+	FirstQual    int `json:"first_qual"`
+	FirstPlayoff int `json:"first_playoff"`
+}
+
 func apiPanicCode(code int, message string, args ...interface{}) {
 	logger.Printf("API Error %d: "+message, append([]interface{}{code}, args...)...)
 	panic(APIError{
@@ -256,6 +261,15 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 	enabled_extra_rps := checkRequestQueryParamBoolArray(r, "enabled_extra_rps")
 	var event_year = parseEventYear(r.URL.Query().Get("event"))
 	var match_folder = getMatchDownloadPath(level, r.URL.Query().Get("event"))
+	practice_settings := PracticeSettings{}
+	practice_settings_str := r.URL.Query().Get("practice_settings")
+	if practice_settings_str != "" {
+		err := json.Unmarshal([]byte(practice_settings_str), &practice_settings)
+		if err != nil {
+			apiPanicBadRequest("could not parse practice_settings: %v", err)
+		}
+	}
+
 	var files []string
 	var err error
 	if download_all {
@@ -314,20 +328,32 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			effective_level := level
+			effective_match_number := match_number
+			if level == MATCH_LEVEL_PRACTICE {
+				if practice_settings.FirstQual >= 1 && match_number >= practice_settings.FirstQual && (practice_settings.FirstPlayoff < practice_settings.FirstQual || match_number < practice_settings.FirstPlayoff) {
+					effective_level = MATCH_LEVEL_QUAL
+					effective_match_number = match_number - practice_settings.FirstQual + 1
+				} else if practice_settings.FirstPlayoff >= 1 && match_number >= practice_settings.FirstPlayoff && (practice_settings.FirstQual < practice_settings.FirstPlayoff || match_number < practice_settings.FirstQual) {
+					effective_level = MATCH_LEVEL_PLAYOFF
+					effective_match_number = match_number - practice_settings.FirstPlayoff + 1
+				}
+			}
+
 			if extra_info.MatchCodeOverride != nil {
 				match_info["comp_level"] = extra_info.MatchCodeOverride.Level
 				match_info["set_number"] = extra_info.MatchCodeOverride.Set
 				match_info["match_number"] = extra_info.MatchCodeOverride.Match
-			} else if level == MATCH_LEVEL_PLAYOFF {
+			} else if effective_level == MATCH_LEVEL_PLAYOFF {
 				// playoffs
-				code := tba.GetPlayoffCode(playoff_type, match_number)
+				code := tba.GetPlayoffCode(playoff_type, effective_match_number)
 				match_info["comp_level"] = code.Level
 				match_info["set_number"] = code.Set
 				match_info["match_number"] = code.Match
 			} else {
 				match_info["comp_level"] = "qm"
 				match_info["set_number"] = 1
-				match_info["match_number"] = match_number
+				match_info["match_number"] = effective_match_number
 			}
 
 			match_json, err := jsonMarshalOptionalIndent(match_info, level == MATCH_LEVEL_MANUAL, "  ")
