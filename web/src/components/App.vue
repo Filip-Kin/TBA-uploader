@@ -1643,7 +1643,7 @@ export default {
         awards: STORED_AWARDS,
         awardStatus: '',
         AWARD_TYPE_OPTIONS: [
-            {name: '(automatic)', value: null},
+            {text: '(automatic)', value: null},
             ...Object.entries(AWARD_TYPE).map(([text, value]) => ({text, value})).sort((a, b) => a.value - b.value),
         ],
         inAwardRequest: false,
