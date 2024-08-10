@@ -358,6 +358,13 @@
                                 >(disabled)</span>
                             </label>
                         </form>
+                        <b-alert
+                            v-if="practiceMatchPlayEnabled && practiceSettingsSanitized.first_qual > 1 && practiceSettingsSanitized.first_playoff > 1"
+                            variant="warning"
+                            show
+                        >
+                            Practice matches between 1 and {{ Math.min(practiceSettingsSanitized.first_qual, practiceSettingsSanitized.first_playoff) - 1 }} (inclusive) are not covered by this configuration and will be treated as qualification matches.
+                        </b-alert>
                     </div>
                 </div>
             </b-tab>
