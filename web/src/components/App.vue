@@ -1681,7 +1681,7 @@ export default {
             return Number.isFinite(playoff_type) ? playoff_type : BRACKET_TYPE.BRACKET_8_TEAM;
         },
         enabledExtraRps: function() {
-            return this.eventExtras[this.selectedEvent].enabled_extra_rps || DEFAULT_ENABLED_EXTRA_RPS;
+            return (this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].enabled_extra_rps) || DEFAULT_ENABLED_EXTRA_RPS;
         },
         enabledExtraRpIndexes: function() {
             return this.enabledExtraRps.map((_, i) => i).filter(i => this.enabledExtraRps[i]);
