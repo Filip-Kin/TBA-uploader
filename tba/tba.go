@@ -67,6 +67,12 @@ var playoffRounds = map[int][]playoffRoundInfo{
 		{level: "f", sets: 1, matches_per_set: 6},
 	},
 	BRACKET_TYPE_CUSTOM: {},
+	BRACKET_TYPE_X_KETTERING_ALLSTAR: {
+		{level: "ef", sets: 2, matches_per_set: 3},
+		{level: "qf", sets: 2, matches_per_set: 3},
+		{level: "sf", sets: 2, matches_per_set: 3},
+		{level: "f", sets: 1, matches_per_set: 6},
+	},
 }
 
 func generateBracket(bracket_type int) Bracket {
