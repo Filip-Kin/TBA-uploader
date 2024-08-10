@@ -8,6 +8,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('input_file', help='.csv file to read from')
 parser.add_argument('-o', '--output-dir', help='fms_data "matches" subfolder to write json results to', required=True)
 parser.add_argument('-v', '--verbose', action='store_true')
+parser.add_argument('-y', '--year', type=int, required=True)
 parser.add_argument('--skip-existing', action='store_true', help='skip matches already written (default: error)')
 args = parser.parse_args()
 
@@ -20,50 +21,6 @@ REQUIRED_HEADERS = [
     'red 1', 'red 2', 'red 3', 'red score',
 
 ]
-# todo: share with go
-DEFAULT_BREAKDOWN_VALUES_2022 = {
-    "adjustPoints":            0,
-    "autoCargoLowerBlue":      0,
-    "autoCargoLowerFar":       0,
-    "autoCargoLowerNear":      0,
-    "autoCargoLowerRed":       0,
-    "autoCargoPoints":         0,
-    "autoCargoTotal":          0,
-    "autoCargoUpperBlue":      0,
-    "autoCargoUpperFar":       0,
-    "autoCargoUpperNear":      0,
-    "autoCargoUpperRed":       0,
-    "autoPoints":              0,
-    "autoTaxiPoints":          0,
-    "cargoBonusRankingPoint":  False,
-    "endgamePoints":           0,
-    "endgameRobot1":           "None",
-    "endgameRobot2":           "None",
-    "endgameRobot3":           "None",
-    "foulCount":               0,
-    "foulPoints":              0,
-    "hangarBonusRankingPoint": False,
-    "matchCargoTotal":         0,
-    "quintetAchieved":         False,
-    "rp":                      0,
-    "taxiRobot1":              "No",
-    "taxiRobot2":              "No",
-    "taxiRobot3":              "No",
-    "techFoulCount":           0,
-    "teleopCargoLowerBlue":    0,
-    "teleopCargoLowerFar":     0,
-    "teleopCargoLowerNear":    0,
-    "teleopCargoLowerRed":     0,
-    "teleopCargoPoints":       0,
-    "teleopCargoTotal":        0,
-    "teleopCargoUpperBlue":    0,
-    "teleopCargoUpperFar":     0,
-    "teleopCargoUpperNear":    0,
-    "teleopCargoUpperRed":     0,
-    "teleopPoints":            0,
-    "totalPoints":             0,
-}
-BREAKDOWN_TYPES_2022 = {k: type(v) for k, v in DEFAULT_BREAKDOWN_VALUES_2022.items()}
 
 def make_match_result():
     return {
@@ -137,39 +94,93 @@ def assign_teams(row, match_result):
 
         match_result['alliances'][alliance]['teams'].append(team_to_tba_key(team))
 
-def assign_breakdown(row, match_result):
+def assign_breakdown(row, match_result, BREAKDOWN_TYPES):
     for key, value in row.items():
         key_parts = key.split('.')
-        if key_parts[0] in {'red', 'blue'} and key_parts[1] in BREAKDOWN_TYPES_2022:
-            match_result['score_breakdown'][key_parts[0]][key_parts[1]] = BREAKDOWN_TYPES_2022[key_parts[1]](value)
+        if key_parts[0] in {'red', 'blue'} and key_parts[1] in BREAKDOWN_TYPES:
+            match_result['score_breakdown'][key_parts[0]][key_parts[1]] = BREAKDOWN_TYPES[key_parts[1]](value)
 
 
-VALID_HANGAR_RESULTS = set(map(sum, itertools.product((0, 4, 6, 10, 15), repeat=3)))
+class Parser:
+    pass
 
-def validate_match_result(match_result):
+class Parser2022(Parser):
+    YEAR = 2022
+    # todo: share with go
+    DEFAULT_BREAKDOWN_VALUES = {
+        "adjustPoints":            0,
+        "autoCargoLowerBlue":      0,
+        "autoCargoLowerFar":       0,
+        "autoCargoLowerNear":      0,
+        "autoCargoLowerRed":       0,
+        "autoCargoPoints":         0,
+        "autoCargoTotal":          0,
+        "autoCargoUpperBlue":      0,
+        "autoCargoUpperFar":       0,
+        "autoCargoUpperNear":      0,
+        "autoCargoUpperRed":       0,
+        "autoPoints":              0,
+        "autoTaxiPoints":          0,
+        "cargoBonusRankingPoint":  False,
+        "endgamePoints":           0,
+        "endgameRobot1":           "None",
+        "endgameRobot2":           "None",
+        "endgameRobot3":           "None",
+        "foulCount":               0,
+        "foulPoints":              0,
+        "hangarBonusRankingPoint": False,
+        "matchCargoTotal":         0,
+        "quintetAchieved":         False,
+        "rp":                      0,
+        "taxiRobot1":              "No",
+        "taxiRobot2":              "No",
+        "taxiRobot3":              "No",
+        "techFoulCount":           0,
+        "teleopCargoLowerBlue":    0,
+        "teleopCargoLowerFar":     0,
+        "teleopCargoLowerNear":    0,
+        "teleopCargoLowerRed":     0,
+        "teleopCargoPoints":       0,
+        "teleopCargoTotal":        0,
+        "teleopCargoUpperBlue":    0,
+        "teleopCargoUpperFar":     0,
+        "teleopCargoUpperNear":    0,
+        "teleopCargoUpperRed":     0,
+        "teleopPoints":            0,
+        "totalPoints":             0,
+    }
+    BREAKDOWN_TYPES = {k: type(v) for k, v in DEFAULT_BREAKDOWN_VALUES.items()}
+
+    VALID_HANGAR_RESULTS = set(map(sum, itertools.product((0, 4, 6, 10, 15), repeat=3)))
     RP_REQUIRED_FIELDS = ('rp', 'cargoBonusRankingPoint', 'hangarBonusRankingPoint', 'totalPoints')
-    for alliance, other_alliance in itertools.permutations(('red', 'blue'), 2):
-        breakdown = match_result['score_breakdown'][alliance]
-        if all(field in breakdown for field in RP_REQUIRED_FIELDS):
-            expected_rp = 0
-            score_diff = breakdown['totalPoints'] - match_result['score_breakdown'][other_alliance]['totalPoints']
-            if score_diff > 0:
-                expected_rp += 2
-            elif score_diff == 0:
-                expected_rp += 1
-            if breakdown['cargoBonusRankingPoint']:
-                expected_rp += 1
-            if breakdown['hangarBonusRankingPoint']:
-                expected_rp += 1
-            if match_result['comp_level'] != 'qm':
-                expected_rp = 0  # match FMS
-            if breakdown['rp'] != expected_rp:
-                raise ValueError('%s: expected rp = %r, got rp = %r' % (alliance, expected_rp, breakdown['rp']))
 
-        if 'endgamePoints' in breakdown:
-            if breakdown['endgamePoints'] not in VALID_HANGAR_RESULTS:
-                raise ValueError('%s: invalid endgamePoints: %r' % (alliance, breakdown['endgamePoints']))
+    @classmethod
+    def validate_match_result(cls, match_result):
+        for alliance, other_alliance in itertools.permutations(('red', 'blue'), 2):
+            breakdown = match_result['score_breakdown'][alliance]
+            if all(field in breakdown for field in cls.RP_REQUIRED_FIELDS):
+                expected_rp = 0
+                score_diff = breakdown['totalPoints'] - match_result['score_breakdown'][other_alliance]['totalPoints']
+                if score_diff > 0:
+                    expected_rp += 2
+                elif score_diff == 0:
+                    expected_rp += 1
+                if breakdown['cargoBonusRankingPoint']:
+                    expected_rp += 1
+                if breakdown['hangarBonusRankingPoint']:
+                    expected_rp += 1
+                if match_result['comp_level'] != 'qm':
+                    expected_rp = 0  # match FMS
+                if breakdown['rp'] != expected_rp:
+                    raise ValueError('%s: expected rp = %r, got rp = %r' % (alliance, expected_rp, breakdown['rp']))
 
+            if 'endgamePoints' in breakdown:
+                if breakdown['endgamePoints'] not in cls.VALID_HANGAR_RESULTS:
+                    raise ValueError('%s: invalid endgamePoints: %r' % (alliance, breakdown['endgamePoints']))
+
+
+parsers = {cls.YEAR: cls for cls in Parser.__subclasses__()}
+parser = parsers[args.year]()
 
 all_match_results = {}
 
@@ -204,9 +215,9 @@ with open(args.input_file, newline='') as input_file:
 
         try:
             assign_teams(row, match_result)
-            assign_breakdown(row, match_result)
+            assign_breakdown(row, match_result, BREAKDOWN_TYPES=parser.BREAKDOWN_TYPES)
 
-            validate_match_result(match_result)
+            parser.validate_match_result(match_result)
         except ValueError as e:
             raise ValueError('In row %i: %s' % (row_number, e))
 
