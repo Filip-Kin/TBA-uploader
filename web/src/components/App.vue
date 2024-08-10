@@ -2854,7 +2854,7 @@ export default {
             this.inUploadRankings = true;
             this.rankingsGeneratedMessageHtml = '';
             try {
-                const matchResults = await this.tbaApiCurrentEventRequest('matches');
+                const matchResults = (await this.tbaApiCurrentEventRequest('matches')).filter(m => m.comp_level == 'qm');
                 this.convertMatchTeamKeysTBAtoFMS(matchResults);
                 this.rankingsReportData = this.rankingsReportTable = tba.generateRankingsFromMatchResults(matchResults, this.eventYear);
                 this.rankingsGeneratedMessageHtml = 'Rankings generated from <strong>' + matchResults.length + '</strong> matches';
