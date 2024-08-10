@@ -1501,6 +1501,8 @@ const DEFAULT_PRACTICE_SETTINGS = Object.freeze({
     first_playoff: -1,
 });
 
+const BRACKET_TYPE_CUSTOM_START = 1000;
+
 function sendApiRequest(url, event, body) {
     return $.ajax({
         type: 'POST',
@@ -1696,7 +1698,13 @@ export default {
             return Object.keys(BRACKET_TYPE).map((key) => ({
                 value: BRACKET_TYPE[key],
                 text: BRACKET_NAME[key],
-            })).sort((a, b) => a.text.localeCompare(b.text));
+            })).sort((a, b) => {
+                if (a.text.startsWith('[') && !b.text.startsWith('['))
+                    return 1;
+                if (b.text.startsWith('[') && !a.text.startsWith('['))
+                    return -1;
+                return a.text.localeCompare(b.text);
+            });
         },
         eventSelected: function() {
             return !!this.selectedEvent && !this.inAddEvent;
@@ -1987,7 +1995,9 @@ export default {
             }
             this.tbaApiCurrentEventRequest().then(function(data) {
                 this.$set(this, 'tbaEventData', data);
-                this.eventExtras[this.selectedEvent].playoff_type = data.playoff_type;
+                if (this.eventExtras[this.selectedEvent].playoff_type < BRACKET_TYPE_CUSTOM_START) {
+                    this.eventExtras[this.selectedEvent].playoff_type = data.playoff_type;
+                }
                 if (!this.eventExtras[this.selectedEvent].video_prefix && data.name) {
                     this.eventExtras[this.selectedEvent].video_prefix = data.year + ' ' + data.name;
                 }
@@ -2127,6 +2137,7 @@ export default {
             if (this.eventExtras[this.selectedEvent].playoff_type === this.tbaEventData.playoff_type) {
                 return [false, 'Playoff type is already set to this'];
             }
+            // TODO: handle custom playoff types (>= BRACKET_TYPE_CUSTOM_START)
             return [true];
         },
 
@@ -2137,7 +2148,7 @@ export default {
         updatePlayoffType: function() {
             const playoff_type = this.eventExtras[this.selectedEvent].playoff_type;
             sendApiRequest('/api/info/upload', this.selectedEvent, {
-                playoff_type,
+                playoff_type: playoff_type >= BRACKET_TYPE_CUSTOM_START ? BRACKET_TYPE.CUSTOM : playoff_type,
             }).then(function() {
                 this.tbaEventData.playoff_type = playoff_type;
             }.bind(this)).fail(function(error) {
