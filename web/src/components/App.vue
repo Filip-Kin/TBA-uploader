@@ -260,7 +260,10 @@
                                     />
                                 </label>
                                 <label>
-                                    <b-form-select v-model="webcast.date" :options="webcastDateOptions"/>
+                                    <b-form-select
+                                        v-model="webcast.date"
+                                        :options="webcastDateOptions"
+                                    />
                                 </label>
                             </form>
                         </div>
@@ -304,6 +307,78 @@
                             class="form-inline"
                         >
                             <b-form-checkbox v-model="eventExtras[selectedEvent].enabled_extra_rps[i]">Enable extra RP {{ i + 1 }}</b-form-checkbox>
+                        </form>
+
+                        <h3 class="mt-2">Practice Match Settings</h3>
+                        Use these settings to allow playing qual and/or playoff matches as practice matches.
+                        <b-alert
+                            v-if="practiceMatchPlayEnabled && !uiOptions.showAllLevels"
+                            variant="danger"
+                            show
+                        >
+                            To use practice matches, you need to enable hidden tournament levels in the Options tab, then select "Practice" under Match Play.
+                        </b-alert>
+                        <form
+                            class="form-inline"
+                        >
+                            <label>
+                                <!-- <b-form-checkbox
+                                    :value="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
+                                    @change="practiceSettingToggle('first_qual', $event)"
+                                >Enable qualification matches</b-form-checkbox>
+                                <span v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]">&nbsp;starting at practice match #</span>
+                                <b-form-input
+                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
+                                    v-model="eventExtras[selectedEvent].practice_settings.first_qual"
+                                    type="number"
+                                    number
+                                /> -->
+                                Enable qualification matches starting at practice match #
+                                <b-form-input
+                                    v-model="eventExtras[selectedEvent].practice_settings.first_qual"
+                                    type="number"
+                                    number
+                                />
+                                <span
+                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
+                                    class="text-success"
+                                >(enabled)</span>
+                                <span
+                                    v-else
+                                    class="text-secondary"
+                                >(disabled)</span>
+                            </label>
+                        </form>
+                        <form
+                            class="form-inline"
+                        >
+                            <label>
+                                <!-- <b-form-checkbox
+                                    :value="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
+                                    @change="practiceSettingToggle('first_qual', $event)"
+                                >Enable qualification matches</b-form-checkbox>
+                                <span v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]">&nbsp;starting at practice match #</span>
+                                <b-form-input
+                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
+                                    v-model="eventExtras[selectedEvent].practice_settings.first_qual"
+                                    type="number"
+                                    number
+                                /> -->
+                                Enable playoff matches starting at practice match #
+                                <b-form-input
+                                    v-model="eventExtras[selectedEvent].practice_settings.first_playoff"
+                                    type="number"
+                                    number
+                                />
+                                <span
+                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.PLAYOFF]"
+                                    class="text-success"
+                                >(enabled)</span>
+                                <span
+                                    v-else
+                                    class="text-secondary"
+                                >(disabled)</span>
+                            </label>
                         </form>
                     </div>
                 </div>
@@ -1436,6 +1511,10 @@ const STORED_ALLIANCES = utils.safeParseLocalStorageObject('alliances');
 const STORED_AWARDS = utils.safeParseLocalStorageObject('awards');
 
 const DEFAULT_ENABLED_EXTRA_RPS = Object.freeze([false, false]);
+const DEFAULT_PRACTICE_SETTINGS = Object.freeze({
+    first_qual: -1,
+    first_playoff: -1,
+});
 
 function sendApiRequest(url, event, body) {
     return $.ajax({
@@ -1689,6 +1768,27 @@ export default {
         anyEnabledExtraRps: function() {
             return this.enabledExtraRps.find(Boolean);
         },
+        practiceMatchPlayEnabled: function() {
+            const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].practice_settings;
+            if (settings) {
+                return settings.first_qual >= 1 || settings.first_playoff >= 1;
+            }
+            return false;
+        },
+        practiceSettingsSanitized: function() {
+            const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].practice_settings;
+            if (settings) {
+                return {
+                    first_qual: Number(settings.first_qual) || -1,
+                    first_playoff: Number(settings.first_playoff) || -1,
+                };
+            }
+            return {...DEFAULT_PRACTICE_SETTINGS};
+        },
+        practiceEnabledLevels: function() {
+            const settings = this.practiceSettingsSanitized;
+            return {[MATCH_LEVEL.QUAL]: settings.first_qual >= 1, [MATCH_LEVEL.PLAYOFF]: settings.first_playoff >= 1};
+        },
         schedulePendingMatchCells: function() {
             var addTeamCell = function(cells, match, color, i) {
                 var cls = {};
@@ -1920,6 +2020,7 @@ export default {
                 alliance_count: 8,
                 alliance_size: 3,
                 enabled_extra_rps: DEFAULT_ENABLED_EXTRA_RPS.slice(),
+                practice_settings: {...DEFAULT_PRACTICE_SETTINGS},
                 video_prefix: '',
             }, this.eventExtras[event]));
 
@@ -2103,6 +2204,15 @@ export default {
             }
             finally {
                 this.inEventRequest = false;
+            }
+        },
+
+        practiceSettingToggle(key, value) {
+            if (key == 'first_qual' || key == 'first_playoff') {
+                this.eventExtras[this.selectedEvent].practice_settings[key] = value ? 1 : -1;
+            }
+            else {
+                throw 'unhandled: ' + key;
             }
         },
 
@@ -2290,6 +2400,7 @@ export default {
                     level: this.matchLevel,
                     playoff_type: this.eventPlayoffType,
                     enabled_extra_rps: this.enabledExtraRps.join(','),
+                    practice_settings: this.practiceSettingsSanitized,
                     all: all ? '1' : '',
                 });
                 this.pendingMatches = JSON.parse(data);
