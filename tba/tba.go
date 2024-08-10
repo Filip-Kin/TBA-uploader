@@ -103,3 +103,11 @@ func GetBracket(bracket_type int) Bracket {
 	}
 	return bracket
 }
+
+func ListSupportedBracketTypes() []int {
+	out := make([]int, 0, len(playoffRounds))
+	for k, _ := range playoffRounds {
+		out = append(out, k)
+	}
+	return out
+}
