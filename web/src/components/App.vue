@@ -638,7 +638,7 @@
                     Be sure to only fetch (or re-fetch) matches <strong>after</strong> scores have been posted in FMS.
                     <span v-if="isQual">Rankings can be updated at any time if necessary, but will also be updated after posting scores.</span>
                 </p>
-                <div v-if="isQual || isPlayoff">
+                <div v-if="canAutoUploadMatches">
                     <b-form-checkbox
                         v-model="autoUploadMatches"
                         name="check-button"
@@ -1826,6 +1826,9 @@ export default {
             }
             return opts;
         },
+        canAutoUploadMatches() {
+            return this.isQual || this.isPlayoff || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
+        },
     },
     watch: {
         selectedTab: function(tab) {
@@ -2433,7 +2436,7 @@ export default {
                 if (!this.autoUploadMatches) {
                     return;
                 }
-                if (!(this.isQual || this.isPlayoff)) {
+                if (!(this.canAutoUploadMatches)) {
                     // requires manual match code override
                     return;
                 }
