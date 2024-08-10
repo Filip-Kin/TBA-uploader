@@ -623,20 +623,20 @@
                         Advanced options
                     </b-button>
                     <b-button
-                        v-if="isQual"
+                        v-if="canUploadRankings"
                         variant="info"
                         class="ml-auto"
                         data-accesskey="r"
                         :disabled="inUploadRankings || isMatchRunning"
                         @click="uploadRankings"
                     >
-                        <span v-if="anyEnabledExtraRps">Generate and </span>Upload rankings
+                        <span v-if="shouldUseTbaRankings">Generate and </span>Upload rankings
                     </b-button>
                 </div>
                 <p>
                     <span class="warning">Warning:</span> do not click any buttons on this page while a match is running.
                     Be sure to only fetch (or re-fetch) matches <strong>after</strong> scores have been posted in FMS.
-                    <span v-if="isQual">Rankings can be updated at any time if necessary, but will also be updated after posting scores.</span>
+                    <span v-if="canUploadRankings">Rankings can be updated at any time if necessary, but will also be updated after posting scores.</span>
                 </p>
                 <div v-if="canAutoUploadMatches">
                     <b-form-checkbox
@@ -844,7 +844,7 @@
                         Some breakdowns were not handled: {{ unhandledBreakdowns.join(", ") }}. Any affected matches will need to be manually edited.
                     </b-alert>
                     <div>
-                        Click "Upload scores" to upload these scores to TBA<span v-if="isQual"> and update rankings</span>. If a match needs to be edited, click on it below. Reasons for this include:
+                        Click "Upload scores" to upload these scores to TBA<span v-if="canUploadRankings"> and update rankings</span>. If a match needs to be edited, click on it below. Reasons for this include:
                         <ul>
                             <li>Any extra rankings points awarded by the head referee (this accompanies score changes in FMS)</li>
                             <li>Red cards</li>
@@ -1837,6 +1837,12 @@ export default {
         canAutoUploadMatches() {
             return this.isQual || this.isPlayoff || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
         },
+        canUploadRankings() {
+            return this.isQual || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
+        },
+        shouldUseTbaRankings() {
+            return this.anyEnabledExtraRps || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
+        },
     },
     watch: {
         selectedTab: function(tab) {
@@ -2524,14 +2530,15 @@ export default {
             var match_ids = this.pendingMatches.map(function(match) {
                 return match._fms_id;
             });
+            var uploading_quals = this.pendingMatches.filter(m => m.comp_level == 'qm').length > 0;
             sendApiRequest('/api/matches/upload', this.selectedEvent, matches).always(function() {
                 this.inMatchRequest = false;
             }.bind(this)).then(function() {
                 this.pendingMatches = [];
                 this.matchSummaries = [];
-                if (this.isQual) {
+                if (this.isQual || uploading_quals) {
                     this.uploadRankings();
-                    if (this.anyEnabledExtraRps) {
+                    if (this.shouldUseTbaRankings) {
                         setTimeout(() => {
                             if (!this.isMatchRunning) {
                                 this.uploadRankings();
@@ -2814,7 +2821,7 @@ export default {
             await this.uploadRankingsReport();
         },
         uploadRankings: async function() {
-            if (this.anyEnabledExtraRps) {
+            if (this.shouldUseTbaRankings) {
                 return this.uploadRankingsFromTBA();
             }
             else {
