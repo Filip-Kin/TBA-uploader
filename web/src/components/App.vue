@@ -1115,9 +1115,10 @@
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>Award Name</th>
-                            <th>Team (recommended)</th>
-                            <th>Person (optional)</th>
+                            <th>Award Name<br><small>(required)</small></th>
+                            <th>Type<br><small>(if nonstandard)</small></th>
+                            <th>Team<br><small>(recommended)</small></th>
+                            <th>Person<br><small>(optional)</small></th>
                             <th>Options</th>
                         </tr>
                     </thead>
@@ -1131,7 +1132,16 @@
                                     v-model="award.name"
                                     title="Award Name"
                                     placeholder="Award Name"
+                                    style="width: 12em"
                                     @blur="saveAwards"
+                                />
+                            </td>
+                            <td>
+                                <b-form-select
+                                    v-model="award.type"
+                                    style="width: 12em"
+                                    :options="AWARD_TYPE_OPTIONS"
+                                    @change="saveAwards"
                                 />
                             </td>
                             <td>
@@ -1140,6 +1150,7 @@
                                     type="number"
                                     title="Team"
                                     placeholder="Team"
+                                    style="width: 5em"
                                     @blur="saveAwards"
                                 />
                             </td>
@@ -1148,6 +1159,7 @@
                                     v-model="award.person"
                                     title="Person"
                                     placeholder="Person"
+                                    style="width: 12em"
                                     @blur="saveAwards"
                                 />
                             </td>
@@ -1471,6 +1483,7 @@ import Vue from 'vue';
 
 import api from 'src/api.js';
 import {
+    AWARD_TYPE,
     BRACKET_NAME,
     BRACKET_TYPE,
     FIELD_STATE,
@@ -1556,6 +1569,7 @@ function makeAward(data) {
         name: '',
         team: '',
         person: '',
+        type: null,
     }, data || {});
 }
 
@@ -1691,6 +1705,10 @@ export default {
 
         awards: STORED_AWARDS,
         awardStatus: '',
+        AWARD_TYPE_OPTIONS: [
+            {text: '(automatic)', value: null},
+            ...Object.entries(AWARD_TYPE).map(([text, value]) => ({text, value})).sort((a, b) => a.value - b.value),
+        ],
         inAwardRequest: false,
     }),
     computed: {
@@ -3199,6 +3217,7 @@ export default {
         },
         clearAward: function(award) {
             award.name = award.team = award.person = '';
+            award.type = null;
             this.saveAwards();
         },
         deleteAward: function(award) {
@@ -3280,6 +3299,7 @@ export default {
                     name_str: award.name,
                     team_key: award.team ? 'frc' + award.team : null,
                     awardee: award.person || null,
+                    type_enum: award.type,
                 };
             });
             if (json.filter(function(award) { return !award.name_str; }).length) {

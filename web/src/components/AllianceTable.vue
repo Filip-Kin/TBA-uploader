@@ -118,7 +118,7 @@ export default {
                     if (a == allianceIndex && t == teamIndex) {
                         continue;
                     }
-                    if (this.teams[a][t] == value) {
+                    if ((this.teams[a] || [])[t] == value) {
                         return 'is-invalid';
                     }
                 }
