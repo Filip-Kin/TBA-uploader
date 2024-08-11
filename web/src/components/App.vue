@@ -1916,11 +1916,14 @@ export default {
                     utils.isFieldStateInMatchLoaded(data.field_state)) {
                     this.lastMatchPlayed = data.match_play;
 
-                    const lastMatchKey = (data.match_play[2] == MATCH_LEVEL.QUAL)
-                        ? 'qm' + data.match_play[0]
-                        : Schedule.getTBAMatchKey(Schedule.getTBAPlayoffCode(this.eventExtras[this.selectedEvent].playoff_type, data.match_play[0]));
-                    if (!this.recentMatchTbaKeys.includes(lastMatchKey)) {
-                        this.recentMatchTbaKeys.push(lastMatchKey);
+                    const lastMatchLevel = data.match_play[2];
+                    if ([MATCH_LEVEL.QUAL, MATCH_LEVEL.PLAYOFF].includes(lastMatchLevel)) {
+                        const lastMatchKey = (lastMatchLevel == MATCH_LEVEL.QUAL)
+                            ? 'qm' + data.match_play[0]
+                            : Schedule.getTBAMatchKey(Schedule.getTBAPlayoffCode(this.eventExtras[this.selectedEvent].playoff_type, data.match_play[0]));
+                        if (!this.recentMatchTbaKeys.includes(lastMatchKey)) {
+                            this.recentMatchTbaKeys.push(lastMatchKey);
+                        }
                     }
                 }
             }
