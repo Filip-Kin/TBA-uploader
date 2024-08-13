@@ -300,13 +300,18 @@
                             </b-button>
                         </div>
 
-                        <h3 class="mt-2">Extra Ranking Points</h3>
+                        <h3 class="mt-2">Ranking Points</h3>
                         <form
                             v-for="(_, i) in eventExtras[selectedEvent].enabled_extra_rps"
                             :key="i"
                             class="form-inline"
                         >
                             <b-form-checkbox v-model="eventExtras[selectedEvent].enabled_extra_rps[i]">Enable extra RP {{ i + 1 }}</b-form-checkbox>
+                        </form>
+                        <form
+                            class="form-inline"
+                        >
+                            <b-form-checkbox v-model="eventExtras[selectedEvent].rp_settings.rank_ties_same">Give teams with all ranking criteria tied the the same rank (instead of breaking ties randomly)</b-form-checkbox>
                         </form>
 
                         <h3 class="mt-2">Practice Match Settings</h3>
@@ -1513,6 +1518,9 @@ const DEFAULT_PRACTICE_SETTINGS = Object.freeze({
     first_qual: -1,
     first_playoff: -1,
 });
+const DEFAULT_RP_SETTINGS = Object.freeze({
+    rank_ties_same: false,
+});
 
 const BRACKET_TYPE_CUSTOM_START = 1000;
 
@@ -1859,7 +1867,9 @@ export default {
             return this.isQual || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
         },
         shouldUseTbaRankings() {
-            return this.anyEnabledExtraRps || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
+            return this.anyEnabledExtraRps ||
+                this.eventExtras[this.selectedEvent].rp_settings.rank_ties_same ||
+                (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
         },
     },
     watch: {
@@ -2046,6 +2056,7 @@ export default {
                 alliance_size: 3,
                 enabled_extra_rps: DEFAULT_ENABLED_EXTRA_RPS.slice(),
                 practice_settings: {...DEFAULT_PRACTICE_SETTINGS},
+                rp_settings: {...DEFAULT_RP_SETTINGS},
                 video_prefix: '',
             }, this.eventExtras[event]));
 
@@ -2877,7 +2888,7 @@ export default {
             try {
                 const matchResults = (await this.tbaApiCurrentEventRequest('matches')).filter(m => m.comp_level == 'qm');
                 this.convertMatchTeamKeysTBAtoFMS(matchResults);
-                this.rankingsReportData = this.rankingsReportTable = tba.generateRankingsFromMatchResults(matchResults, this.eventYear);
+                this.rankingsReportData = this.rankingsReportTable = tba.generateRankingsFromMatchResults(matchResults, this.eventYear, this.eventExtras[this.selectedEvent].rp_settings);
                 this.rankingsGeneratedMessageHtml = 'Rankings generated from <strong>' + matchResults.length + '</strong> matches';
             }
             catch (e) {

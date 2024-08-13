@@ -175,7 +175,7 @@ const tba = Object.freeze({
         ],
     }),
 
-    generateRankingsFromMatchResults: function(matchResults, year) {
+    generateRankingsFromMatchResults: function(matchResults, year, flags) {
         const getMatchTeams = function(match) {
             const teams = [];
             for (const alliance of ['red', 'blue']) {
@@ -276,17 +276,25 @@ const tba = Object.freeze({
             }
         }
 
-        // sort references, then modify in place to add rank field
-        const sortedRankings = Object.values(rankings).sort(function(a, b) {
+        const compareRank = function(a, b) {
             for (const field of tba.RANKING_NAMES[year]) {
                 if (a[field] != b[field]) {
                     return b[field] - a[field];
                 }
             }
             return 0;
-        });
-        for (let i = 0; i < sortedRankings.length; i++) {
-            sortedRankings[i].rank = i + 1;
+        }
+
+        // sort references, then modify in place to add rank field
+        const sortedRankings = Object.values(rankings).sort(compareRank);
+        for (let i = 0, rank = 0; i < sortedRankings.length; i++) {
+            if (i > 0 && flags.rank_ties_same && compareRank(sortedRankings[i - 1], sortedRankings[i]) == 0) {
+                // keep the same rank as the last team
+            }
+            else {
+                rank++;
+            }
+            sortedRankings[i].rank = rank;
         }
 
         return sortedRankings;
