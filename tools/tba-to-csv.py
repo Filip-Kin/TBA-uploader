@@ -139,4 +139,5 @@ if args.parser.startswith('rp'):
     records = download_event_rankings(args.event_key)["rankings"]
 else:
     records = download_event_matches(args.event_key)
+    records = [m for m in records if m['comp_level'] == 'qm']
 parse_and_print_csv(records, year_fields[year][args.parser])
