@@ -300,7 +300,7 @@
                             </b-button>
                         </div>
 
-                        <h3 class="mt-2">Extra Ranking Points</h3>
+                        <h3 class="mt-2">Ranking Points</h3>
                         <form
                             v-for="(_, i) in eventExtras[selectedEvent].enabled_extra_rps"
                             :key="i"
@@ -308,6 +308,68 @@
                         >
                             <b-form-checkbox v-model="eventExtras[selectedEvent].enabled_extra_rps[i]">Enable extra RP {{ i + 1 }}</b-form-checkbox>
                         </form>
+                        <form
+                            class="form-inline"
+                        >
+                            <b-form-checkbox v-model="eventExtras[selectedEvent].rp_settings.rank_ties_same">Give teams with all ranking criteria tied the the same rank (instead of breaking ties randomly)</b-form-checkbox>
+                        </form>
+
+                        <h3 class="mt-2">Practice Match Settings</h3>
+                        Use these settings to allow playing qual and/or playoff matches as practice matches.
+                        <b-alert
+                            v-if="practiceMatchPlayEnabled && !uiOptions.showAllLevels"
+                            variant="danger"
+                            show
+                        >
+                            To use practice matches, you need to enable hidden tournament levels in the Options tab, then select "Practice" under Match Play.
+                        </b-alert>
+                        <form
+                            class="form-inline"
+                        >
+                            <label>
+                                Enable qualification matches starting at practice match #
+                                <b-form-input
+                                    v-model="eventExtras[selectedEvent].practice_settings.first_qual"
+                                    type="number"
+                                    number
+                                />
+                                <span
+                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.QUAL]"
+                                    class="text-success"
+                                >(enabled)</span>
+                                <span
+                                    v-else
+                                    class="text-secondary"
+                                >(disabled)</span>
+                            </label>
+                        </form>
+                        <form
+                            class="form-inline"
+                        >
+                            <label>
+                                Enable playoff matches starting at practice match #
+                                <b-form-input
+                                    v-model="eventExtras[selectedEvent].practice_settings.first_playoff"
+                                    type="number"
+                                    number
+                                />
+                                <span
+                                    v-if="practiceEnabledLevels[consts.MATCH_LEVEL.PLAYOFF]"
+                                    class="text-success"
+                                >(enabled)</span>
+                                <span
+                                    v-else
+                                    class="text-secondary"
+                                >(disabled)</span>
+                            </label>
+                        </form>
+                        <b-alert
+                            v-if="practiceMatchPlayEnabled && practiceSettingsSanitized.first_qual > 1 && practiceSettingsSanitized.first_playoff > 1"
+                            variant="warning"
+                            show
+                        >
+                            Practice matches between 1 and {{ Math.min(practiceSettingsSanitized.first_qual, practiceSettingsSanitized.first_playoff) - 1 }} (inclusive) are not covered by this configuration and will be treated as qualification matches.
+                        </b-alert>
                     </div>
                 </div>
             </b-tab>
@@ -566,22 +628,22 @@
                         Advanced options
                     </b-button>
                     <b-button
-                        v-if="isQual"
+                        v-if="canUploadRankings"
                         variant="info"
                         class="ml-auto"
                         data-accesskey="r"
                         :disabled="inUploadRankings || isMatchRunning"
                         @click="uploadRankings"
                     >
-                        <span v-if="anyEnabledExtraRps">Generate and </span>Upload rankings
+                        <span v-if="shouldUseTbaRankings">Generate and </span>Upload rankings
                     </b-button>
                 </div>
                 <p>
                     <span class="warning">Warning:</span> do not click any buttons on this page while a match is running.
                     Be sure to only fetch (or re-fetch) matches <strong>after</strong> scores have been posted in FMS.
-                    <span v-if="isQual">Rankings can be updated at any time if necessary, but will also be updated after posting scores.</span>
+                    <span v-if="canUploadRankings">Rankings can be updated at any time if necessary, but will also be updated after posting scores.</span>
                 </p>
-                <div v-if="isQual || isPlayoff">
+                <div v-if="canAutoUploadMatches">
                     <b-form-checkbox
                         v-model="autoUploadMatches"
                         name="check-button"
@@ -787,7 +849,7 @@
                         Some breakdowns were not handled: {{ unhandledBreakdowns.join(", ") }}. Any affected matches will need to be manually edited.
                     </b-alert>
                     <div>
-                        Click "Upload scores" to upload these scores to TBA<span v-if="isQual"> and update rankings</span>. If a match needs to be edited, click on it below. Reasons for this include:
+                        Click "Upload scores" to upload these scores to TBA<span v-if="canUploadRankings"> and update rankings</span>. If a match needs to be edited, click on it below. Reasons for this include:
                         <ul>
                             <li>Any extra rankings points awarded by the head referee (this accompanies score changes in FMS)</li>
                             <li>Red cards</li>
@@ -1452,6 +1514,15 @@ const STORED_ALLIANCES = utils.safeParseLocalStorageObject('alliances');
 const STORED_AWARDS = utils.safeParseLocalStorageObject('awards');
 
 const DEFAULT_ENABLED_EXTRA_RPS = Object.freeze([false, false]);
+const DEFAULT_PRACTICE_SETTINGS = Object.freeze({
+    first_qual: -1,
+    first_playoff: -1,
+});
+const DEFAULT_RP_SETTINGS = Object.freeze({
+    rank_ties_same: false,
+});
+
+const BRACKET_TYPE_CUSTOM_START = 1000;
 
 function sendApiRequest(url, event, body) {
     return $.ajax({
@@ -1653,7 +1724,13 @@ export default {
             return Object.keys(BRACKET_TYPE).map((key) => ({
                 value: BRACKET_TYPE[key],
                 text: BRACKET_NAME[key],
-            })).sort((a, b) => a.text.localeCompare(b.text));
+            })).sort((a, b) => {
+                if (a.text.startsWith('[') && !b.text.startsWith('['))
+                    return 1;
+                if (b.text.startsWith('[') && !a.text.startsWith('['))
+                    return -1;
+                return a.text.localeCompare(b.text);
+            });
         },
         eventSelected: function() {
             return !!this.selectedEvent && !this.inAddEvent;
@@ -1710,6 +1787,27 @@ export default {
         anyEnabledExtraRps: function() {
             return this.enabledExtraRps.find(Boolean);
         },
+        practiceSettingsSanitized: function() {
+            const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].practice_settings;
+            if (settings) {
+                return {
+                    first_qual: Number(settings.first_qual) || -1,
+                    first_playoff: Number(settings.first_playoff) || -1,
+                };
+            }
+            return {...DEFAULT_PRACTICE_SETTINGS};
+        },
+        practiceMatchPlayEnabled: function() {
+            const settings = this.practiceSettingsSanitized;
+            if (settings) {
+                return settings.first_qual >= 1 || settings.first_playoff >= 1;
+            }
+            return false;
+        },
+        practiceEnabledLevels: function() {
+            const settings = this.practiceSettingsSanitized;
+            return {[MATCH_LEVEL.QUAL]: settings.first_qual >= 1, [MATCH_LEVEL.PLAYOFF]: settings.first_playoff >= 1};
+        },
         schedulePendingMatchCells: function() {
             var addTeamCell = function(cells, match, color, i) {
                 var cls = {};
@@ -1761,6 +1859,17 @@ export default {
                 opts.push({value: dateString, text: dateString});
             }
             return opts;
+        },
+        canAutoUploadMatches() {
+            return this.isQual || this.isPlayoff || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
+        },
+        canUploadRankings() {
+            return this.isQual || (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
+        },
+        shouldUseTbaRankings() {
+            return this.anyEnabledExtraRps ||
+                this.eventExtras[this.selectedEvent].rp_settings.rank_ties_same ||
+                (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
         },
     },
     watch: {
@@ -1817,11 +1926,14 @@ export default {
                     utils.isFieldStateInMatchLoaded(data.field_state)) {
                     this.lastMatchPlayed = data.match_play;
 
-                    const lastMatchKey = (data.match_play[2] == MATCH_LEVEL.QUAL)
-                        ? 'qm' + data.match_play[0]
-                        : Schedule.getTBAMatchKey(Schedule.getTBAPlayoffCode(this.eventExtras[this.selectedEvent].playoff_type, data.match_play[0]));
-                    if (!this.recentMatchTbaKeys.includes(lastMatchKey)) {
-                        this.recentMatchTbaKeys.push(lastMatchKey);
+                    const lastMatchLevel = data.match_play[2];
+                    if ([MATCH_LEVEL.QUAL, MATCH_LEVEL.PLAYOFF].includes(lastMatchLevel)) {
+                        const lastMatchKey = (lastMatchLevel == MATCH_LEVEL.QUAL)
+                            ? 'qm' + data.match_play[0]
+                            : Schedule.getTBAMatchKey(Schedule.getTBAPlayoffCode(this.eventExtras[this.selectedEvent].playoff_type, data.match_play[0]));
+                        if (!this.recentMatchTbaKeys.includes(lastMatchKey)) {
+                            this.recentMatchTbaKeys.push(lastMatchKey);
+                        }
                     }
                 }
             }
@@ -1920,7 +2032,9 @@ export default {
             }
             this.tbaApiCurrentEventRequest().then(function(data) {
                 this.$set(this, 'tbaEventData', data);
-                this.eventExtras[this.selectedEvent].playoff_type = data.playoff_type;
+                if (this.eventExtras[this.selectedEvent].playoff_type < BRACKET_TYPE_CUSTOM_START) {
+                    this.eventExtras[this.selectedEvent].playoff_type = data.playoff_type;
+                }
                 if (!this.eventExtras[this.selectedEvent].video_prefix && data.name) {
                     this.eventExtras[this.selectedEvent].video_prefix = data.year + ' ' + data.name;
                 }
@@ -1941,6 +2055,8 @@ export default {
                 alliance_count: 8,
                 alliance_size: 3,
                 enabled_extra_rps: DEFAULT_ENABLED_EXTRA_RPS.slice(),
+                practice_settings: {...DEFAULT_PRACTICE_SETTINGS},
+                rp_settings: {...DEFAULT_RP_SETTINGS},
                 video_prefix: '',
             }, this.eventExtras[event]));
 
@@ -2059,6 +2175,7 @@ export default {
             if (this.eventExtras[this.selectedEvent].playoff_type === this.tbaEventData.playoff_type) {
                 return [false, 'Playoff type is already set to this'];
             }
+            // TODO: handle custom playoff types (>= BRACKET_TYPE_CUSTOM_START)
             return [true];
         },
 
@@ -2069,7 +2186,7 @@ export default {
         updatePlayoffType: function() {
             const playoff_type = this.eventExtras[this.selectedEvent].playoff_type;
             sendApiRequest('/api/info/upload', this.selectedEvent, {
-                playoff_type,
+                playoff_type: playoff_type >= BRACKET_TYPE_CUSTOM_START ? BRACKET_TYPE.CUSTOM : playoff_type,
             }).then(function() {
                 this.tbaEventData.playoff_type = playoff_type;
             }.bind(this)).fail(function(error) {
@@ -2311,6 +2428,7 @@ export default {
                     level: this.matchLevel,
                     playoff_type: this.eventPlayoffType,
                     enabled_extra_rps: this.enabledExtraRps.join(','),
+                    practice_settings: JSON.stringify(this.practiceSettingsSanitized),
                     all: all ? '1' : '',
                 });
                 this.pendingMatches = JSON.parse(data);
@@ -2367,7 +2485,7 @@ export default {
                 if (!this.autoUploadMatches) {
                     return;
                 }
-                if (!(this.isQual || this.isPlayoff)) {
+                if (!(this.canAutoUploadMatches)) {
                     // requires manual match code override
                     return;
                 }
@@ -2444,14 +2562,15 @@ export default {
             var match_ids = this.pendingMatches.map(function(match) {
                 return match._fms_id;
             });
+            var uploading_quals = this.pendingMatches.filter(m => m.comp_level == 'qm').length > 0;
             sendApiRequest('/api/matches/upload', this.selectedEvent, matches).always(function() {
                 this.inMatchRequest = false;
             }.bind(this)).then(function() {
                 this.pendingMatches = [];
                 this.matchSummaries = [];
-                if (this.isQual) {
+                if (this.isQual || uploading_quals) {
                     this.uploadRankings();
-                    if (this.anyEnabledExtraRps) {
+                    if (this.shouldUseTbaRankings) {
                         setTimeout(() => {
                             if (!this.isMatchRunning) {
                                 this.uploadRankings();
@@ -2734,7 +2853,7 @@ export default {
             await this.uploadRankingsReport();
         },
         uploadRankings: async function() {
-            if (this.anyEnabledExtraRps) {
+            if (this.shouldUseTbaRankings) {
                 return this.uploadRankingsFromTBA();
             }
             else {
@@ -2767,9 +2886,9 @@ export default {
             this.inUploadRankings = true;
             this.rankingsGeneratedMessageHtml = '';
             try {
-                const matchResults = await this.tbaApiCurrentEventRequest('matches');
+                const matchResults = (await this.tbaApiCurrentEventRequest('matches')).filter(m => m.comp_level == 'qm');
                 this.convertMatchTeamKeysTBAtoFMS(matchResults);
-                this.rankingsReportData = this.rankingsReportTable = tba.generateRankingsFromMatchResults(matchResults, this.eventYear);
+                this.rankingsReportData = this.rankingsReportTable = tba.generateRankingsFromMatchResults(matchResults, this.eventYear, this.eventExtras[this.selectedEvent].rp_settings);
                 this.rankingsGeneratedMessageHtml = 'Rankings generated from <strong>' + matchResults.length + '</strong> matches';
             }
             catch (e) {

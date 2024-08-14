@@ -67,6 +67,12 @@ var playoffRounds = map[int][]playoffRoundInfo{
 		{level: "f", sets: 1, matches_per_set: 6},
 	},
 	BRACKET_TYPE_CUSTOM: {},
+	BRACKET_TYPE_X_KETTERING_ALLSTAR: {
+		{level: "ef", sets: 2, matches_per_set: 3},
+		{level: "qf", sets: 2, matches_per_set: 3},
+		{level: "sf", sets: 2, matches_per_set: 3},
+		{level: "f", sets: 1, matches_per_set: 6},
+	},
 }
 
 func generateBracket(bracket_type int) Bracket {
@@ -96,4 +102,12 @@ func GetBracket(bracket_type int) Bracket {
 		cachedBrackets[bracket_type] = bracket
 	}
 	return bracket
+}
+
+func ListSupportedBracketTypes() []int {
+	out := make([]int, 0, len(playoffRounds))
+	for k, _ := range playoffRounds {
+		out = append(out, k)
+	}
+	return out
 }
