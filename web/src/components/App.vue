@@ -1002,8 +1002,8 @@
                                 {{ key }}:
                                 <b-form-input
                                     v-model="video.current"
-                                    @blur="cleanVideoUrls"
                                     autocomplete="off"
+                                    @blur="cleanVideoUrls"
                                 />
                             </label>
                         </div>
