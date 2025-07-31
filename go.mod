@@ -3,7 +3,7 @@ module github.com/lethosor/TBA-uploader
 go 1.18
 
 require (
-	github.com/PuerkitoBio/goquery v1.8.0
+	github.com/PuerkitoBio/goquery v1.9.3
 	github.com/gorilla/mux v1.8.0
 	golang.org/x/time v0.3.0
 	nhooyr.io/websocket v1.8.7
@@ -17,7 +17,7 @@ require (
 )
 
 require (
-	github.com/andybalholm/cascadia v1.3.1 // indirect
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/net v0.17.0 // indirect
+	golang.org/x/net v0.29.0 // indirect
 )
