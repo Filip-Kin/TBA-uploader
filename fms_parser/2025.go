@@ -152,6 +152,28 @@ func assignReefRow(breakdown map[string]any, reef_field string, reef_row_field s
 	json.Unmarshal(vals_enc, &reef)
 }
 
+// in: point_values = [trough, bot, mid, top] (points per coral)
+// out: (points, number of coral)
+func calculateReefTotals(reef *reef2025, point_values [4]int) (int, int) {
+	count := 0
+	points := 0
+	add := func(num_coral, points_per_coral int) {
+		count += num_coral
+		points += num_coral * points_per_coral
+	}
+	add(reef.TroughCount, point_values[0])
+	add(reef.BotRowCount, point_values[1])
+	add(reef.MidRowCount, point_values[2])
+	add(reef.TopRowCount, point_values[3])
+
+	return points, count
+}
+
+var REEF_THRESHOLDS = map[string][4]int{
+	"auto":   {3, 4, 6, 7},
+	"teleop": {2, 3, 4, 5},
+}
+
 func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]interface{}, error) {
 	//////////////////////////////////////////////////
 	// Parse html from FMS into TBA-compatible JSON //
@@ -422,6 +444,21 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 			fmt.Printf("Parse error in %s: assignTotalField: %v\n", filename, err)
 			parse_errors = append(parse_errors, fmt.Sprintf("assignTotalField: %v", err))
 		}
+	}
+
+	for _, alliance := range []string{"blue", "red"} {
+		auto_reef := breakdown[alliance]["autoReef"].(*reef2025)
+		teleop_reef := breakdown[alliance]["teleopReef"].(*reef2025)
+		auto_points, auto_count := calculateReefTotals(auto_reef, REEF_THRESHOLDS["auto"])
+		teleop_points, teleop_count := calculateReefTotals(teleop_reef, REEF_THRESHOLDS["teleop"])
+		// subtract off the teleop points for coral that were scored in auto
+		teleop_points_for_auto_coral, _ := calculateReefTotals(auto_reef, REEF_THRESHOLDS["teleop"])
+		teleop_points -= teleop_points_for_auto_coral
+
+		breakdown[alliance]["autoCoralPoints"] = auto_points
+		breakdown[alliance]["autoCoralCount"] = auto_count
+		breakdown[alliance]["teleopCoralPoints"] = teleop_points
+		breakdown[alliance]["teleopCoralCount"] = teleop_count
 	}
 
 	// // fields determined by coopertition:
