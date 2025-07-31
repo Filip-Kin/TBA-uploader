@@ -18,7 +18,7 @@ jobs:
             allow-upload: true
             allow-release: true
         go-version:
-          - '1.18'
+          - '1.19'
         allow-upload:
           - true
         allow-release:
