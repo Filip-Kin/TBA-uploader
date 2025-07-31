@@ -132,14 +132,26 @@ func makeDefaultScoreThresholds2025() scoreThresholds2025 {
 	}
 }
 
-type reefDict2025 map[string]any
+type reef2025 struct {
+	BotRow      map[string]bool `json:"botRow"`
+	MidRow      map[string]bool `json:"midRow"`
+	TopRow      map[string]bool `json:"topRow"`
+	BotRowCount int             `json:"tba_botRowCount"`
+	MidRowCount int             `json:"tba_midRowCount"`
+	TopRowCount int             `json:"tba_topRowCount"`
+	TroughCount int             `json:"trough"`
+}
+
+func makeReef2025() reef2025 {
+	return reef2025{
+		BotRow: make(map[string]bool),
+		MidRow: make(map[string]bool),
+		TopRow: make(map[string]bool),
+	}
+}
 
 func assignReefRow(breakdown map[string]any, reef_field string, reef_row_field string, cell *goquery.Selection) {
-	reef, reef_exists := breakdown[reef_field].(reefDict2025)
-	if !reef_exists {
-		reef = make(reefDict2025)
-		breakdown[reef_field] = reef
-	}
+	reef := breakdown[reef_field].(reef2025)
 	reefRow := make(map[string]bool)
 	reefValues := iconsToBools(cell, 12, "fa-check", "fa-circle-small")
 	count := 0
@@ -149,8 +161,13 @@ func assignReefRow(breakdown map[string]any, reef_field string, reef_row_field s
 			count++
 		}
 	}
-	reef[reef_row_field] = reefRow
-	reef["tba_"+reef_row_field+"Count"] = count
+	vals := make(map[string]any)
+	vals[reef_row_field] = reefRow
+	vals["tba_"+reef_row_field+"Count"] = count
+	vals_enc, _ := json.Marshal(vals)
+	json.Unmarshal(vals_enc, &reef)
+
+	breakdown[reef_field] = reef
 }
 
 func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]interface{}, error) {
@@ -236,6 +253,12 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 			panic(fmt.Sprintf("no active match phase: %s", desc))
 		}
 	}
+
+	// year-specific:
+	breakdown["blue"]["autoReef"] = makeReef2025()
+	breakdown["blue"]["teleopReef"] = makeReef2025()
+	breakdown["red"]["autoReef"] = makeReef2025()
+	breakdown["red"]["teleopReef"] = makeReef2025()
 
 	dom.Find("tr").Each(func(i int, s *goquery.Selection) {
 		defer func() {
@@ -392,12 +415,17 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 				reef_field := match_phase + "Reef"
 				assignReefRow(breakdown["red"], reef_field, reef_row_field, red_cell)
 				assignReefRow(breakdown["blue"], reef_field, reef_row_field, blue_cell)
-				// blue_values := iconsToBools(blue_cell, 3, "fa-check", "fa-times")
-				// red_values := iconsToBools(red_cell, 3, "fa-check", "fa-times")
-				// for i, api_field_suffix := range []string{"StageRight", "CenterStage", "StageLeft"} {
-				// breakdown["blue"][api_field_prefix+api_field_suffix] = blue_values[i]
-				// breakdown["red"][api_field_prefix+api_field_suffix] = red_values[i]
-				// }
+			} else if row_name == "trough" {
+				reef_field := match_phase + "Reef"
+				counts := map[string]int{
+					"blue": checkParseInt(blue_text, "blue "+row_name),
+					"red":  checkParseInt(red_text, "red "+row_name),
+				}
+				for alliance, count := range counts {
+					reef := breakdown[alliance][reef_field].(reef2025)
+					reef.TroughCount = count
+					breakdown[alliance][reef_field] = reef
+				}
 			} else {
 				breakdown["blue"]["!"+row_name] = blue_text
 				breakdown["red"]["!"+row_name] = red_text
