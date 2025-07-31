@@ -142,8 +142,8 @@ type reef2025 struct {
 	TroughCount int             `json:"trough"`
 }
 
-func makeReef2025() reef2025 {
-	return reef2025{
+func makeReef2025() *reef2025 {
+	return &reef2025{
 		BotRow: make(map[string]bool),
 		MidRow: make(map[string]bool),
 		TopRow: make(map[string]bool),
@@ -151,7 +151,7 @@ func makeReef2025() reef2025 {
 }
 
 func assignReefRow(breakdown map[string]any, reef_field string, reef_row_field string, cell *goquery.Selection) {
-	reef := breakdown[reef_field].(reef2025)
+	reef := breakdown[reef_field].(*reef2025)
 	reefRow := make(map[string]bool)
 	reefValues := iconsToBools(cell, 12, "fa-check", "fa-circle-small")
 	count := 0
@@ -166,8 +166,6 @@ func assignReefRow(breakdown map[string]any, reef_field string, reef_row_field s
 	vals["tba_"+reef_row_field+"Count"] = count
 	vals_enc, _ := json.Marshal(vals)
 	json.Unmarshal(vals_enc, &reef)
-
-	breakdown[reef_field] = reef
 }
 
 func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]interface{}, error) {
@@ -422,9 +420,8 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 					"red":  checkParseInt(red_text, "red "+row_name),
 				}
 				for alliance, count := range counts {
-					reef := breakdown[alliance][reef_field].(reef2025)
+					reef := breakdown[alliance][reef_field].(*reef2025)
 					reef.TroughCount = count
-					breakdown[alliance][reef_field] = reef
 				}
 			} else {
 				breakdown["blue"]["!"+row_name] = blue_text
