@@ -314,7 +314,7 @@ func countRankingPoints(cell *goquery.Selection) (int, error) {
 	}
 
 	if cell.Find("div.col-md-2, div.col-md-3").Length() >= 4 {
-		return cell.Find("i.fas").Length(), nil
+		return cell.Find("i.fas, i.fak").Length(), nil
 	}
 
 	return 0, fmt.Errorf("unrecognized RP format")

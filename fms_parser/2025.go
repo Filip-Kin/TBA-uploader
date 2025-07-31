@@ -333,10 +333,12 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 
 					breakdown[alliance]["rp"] = rp
 
-					if cell.Find("div.col-md-3").Length() >= 4 {
+					// year-specific:
+					if cell.Find("div.col-md-2").Length() >= 6 {
 						// RPs are icons
-						breakdown[alliance]["melodyBonusAchieved"] = cell.Find("i.fa-music").Length() >= 1
-						breakdown[alliance]["ensembleBonusAchieved"] = cell.Find("i.fa-users").Length() >= 1
+						breakdown[alliance]["autoBonusAchieved"] = cell.Find("i.fa-robot").Length() >= 1
+						breakdown[alliance]["bargeBonusAchieved"] = cell.Find("i.fa-ship").Length() >= 1
+						breakdown[alliance]["coralBonusAchieved"] = cell.Find("i.fa-coral-solid").Length() >= 1
 					}
 				}
 			} else if row_name == "autonomous points" {
