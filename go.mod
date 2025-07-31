@@ -1,6 +1,6 @@
 module github.com/lethosor/TBA-uploader
 
-go 1.20
+go 1.18
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.3
