@@ -69,6 +69,13 @@ const rankingBreakdownSources = {
         'Avg Auto': RankingReducerAverage('autoPoints'),
         'Avg Stage': RankingReducerAverage('endGameTotalStagePoints'),
     },
+    2025: {
+        'Ranking Score': RankingReducerAverage('rp'),
+        // 'Avg Coop': RankingReducerAverage(['coopertitionBonusAchieved']), needs both alliances??
+        'Avg Match': RankingReducerAverage(['totalPoints', '-foulPoints']),
+        'Avg Auto': RankingReducerAverage(['autoPoints']),  // autoCoralPoints + autoMobilityPoints ??
+        'Avg Barge': RankingReducerAverage(['endGameBargePoints']),  // ?
+    },
 };
 
 const tba = Object.freeze({
@@ -137,6 +144,15 @@ const tba = Object.freeze({
                 "Avg Stage": r.sort5,
             });
         },
+        2025: function(r) {
+            return Object.assign(tba.convertToTBARankings.common(r), {
+                "Ranking Score": r.sort1,
+                "Avg Coop": r.sort2,
+                "Avg Match": r.sort3,
+                "Avg Auto": r.sort4,
+                "Avg Barge": r.sort5,
+            });
+        },
     }),
 
     RANKING_NAMES: Object.freeze({
@@ -172,6 +188,13 @@ const tba = Object.freeze({
             "Avg Match",
             "Avg Auto",
             "Avg Stage",
+        ],
+        2025: [
+            "Ranking Score",
+            "Avg Coop",
+            "Avg Match",
+            "Avg Auto",
+            "Avg Barge",
         ],
     }),
 
@@ -283,7 +306,7 @@ const tba = Object.freeze({
                 }
             }
             return 0;
-        }
+        };
 
         // sort references, then modify in place to add rank field
         const sortedRankings = Object.values(rankings).sort(compareRank);

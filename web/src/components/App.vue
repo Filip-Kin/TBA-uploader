@@ -1593,6 +1593,7 @@ const EXTRA_FIELDS = {
     2022: {},
     2023: {},
     2024: {},
+    2025: {},
 };
 
 export default {

@@ -21,6 +21,7 @@ var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, erro
 	2022: parseHTMLtoJSON2022,
 	2023: parseHTMLtoJSON2023,
 	2024: parseHTMLtoJSON2024,
+	2025: parseHTMLtoJSON2025,
 }
 
 func ParseHTMLtoJSON(year int, filename string, config FMSParseConfig) (map[string]interface{}, error) {
@@ -312,7 +313,7 @@ func countRankingPoints(cell *goquery.Selection) (int, error) {
 		return int(n), nil
 	}
 
-	if cell.Find("div.col-md-3").Length() >= 4 {
+	if cell.Find("div.col-md-2, div.col-md-3").Length() >= 4 {
 		return cell.Find("i.fas").Length(), nil
 	}
 
