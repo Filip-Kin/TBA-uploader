@@ -116,22 +116,6 @@ var reefRowFields2025 = map[string]string{
 	"high branch":   "topRow",
 }
 
-type scoreThresholds2025 struct {
-	EnsembleBonusOnStageRobotsThreshold int `json:"ensembleBonusOnStageRobotsThreshold"`
-	EnsembleBonusStagePointsThreshold   int `json:"ensembleBonusStagePointsThreshold"`
-	MelodyBonusThresholdCoop            int `json:"melodyBonusThresholdCoop"`
-	MelodyBonusThresholdNonCoop         int `json:"melodyBonusThresholdNonCoop"`
-}
-
-func makeDefaultScoreThresholds2025() scoreThresholds2025 {
-	return scoreThresholds2025{
-		EnsembleBonusOnStageRobotsThreshold: 2,
-		EnsembleBonusStagePointsThreshold:   10,
-		MelodyBonusThresholdCoop:            15,
-		MelodyBonusThresholdNonCoop:         18,
-	}
-}
-
 type reef2025 struct {
 	BotRow      map[string]bool `json:"botRow"`
 	MidRow      map[string]bool `json:"midRow"`
@@ -226,13 +210,6 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 	}{
 		makeFmsScoreInfo2025(),
 		makeFmsScoreInfo2025(),
-	}
-
-	thresholds := makeDefaultScoreThresholds2025()
-	// TODO: read thresholds from request
-	err = assignBreakdownFieldsFromJsonStruct[scoreThresholds2025](breakdown, thresholds)
-	if err != nil {
-		panic(fmt.Sprintf("could not assign thresholds: %v", err))
 	}
 
 	parse_errors := make([]string, 0)
@@ -391,7 +368,7 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 				})
 				scoreInfo.blue.fouls = blue_points
 				scoreInfo.red.fouls = red_points
-			} else if row_name == "fouls/techs committed" {
+			} else if row_name == "fouls committed" {
 				assignBreakdownAllianceMultipleFields(breakdown, []string{"foulCount", "techFoulCount"}, parseIntWrapper, breakdownAllianceMultipleFields[string]{
 					blue: split_and_strip(blue_text, "•"),
 					red:  split_and_strip(red_text, "•"),
@@ -403,11 +380,16 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 				})
 
 				// begin year-specific
-				// } else if row_name == "leave" {
-				// 	assignBreakdownRobotFields(breakdown, "autoLineRobot", boolToYesNo, breakdownRobotFields[bool]{
-				// 		blue: iconsToBools(blue_cell, 3, "fa-check", "fa-times"),
-				// 		red:  iconsToBools(red_cell, 3, "fa-check", "fa-times"),
-				// 	})
+			} else if row_name == "leave" {
+				assignBreakdownRobotFields(breakdown, "autoLineRobot", boolToYesNo, breakdownRobotFields[bool]{
+					blue: iconsToBools(blue_cell, 3, "fa-check", "fa-times"),
+					red:  iconsToBools(red_cell, 3, "fa-check", "fa-times"),
+				})
+			} else if row_name == "barge" {
+				assignBreakdownRobotFields(breakdown, "endGameRobot", identity_fn[string], breakdownRobotFields[string]{
+					blue: split_and_strip(blue_text, "\n"),
+					red:  split_and_strip(red_text, "\n"),
+				})
 			} else if reef_row_field, ok := reefRowFields2025[row_name]; ok {
 				validateMatchPhase(match_phase)
 				reef_field := match_phase + "Reef"
@@ -423,6 +405,8 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 					reef := breakdown[alliance][reef_field].(*reef2025)
 					reef.TroughCount = count
 				}
+			} else if row_name == "coopertition bonus" {
+				// does not map to an API field
 			} else {
 				breakdown["blue"]["!"+row_name] = blue_text
 				breakdown["red"]["!"+row_name] = red_text
@@ -438,24 +422,13 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 		}
 	}
 
-	// fields determined by coopertition:
-	for _, alliance := range []string{"blue", "red"} {
-		if coop_button_field, ok := breakdown[alliance]["coopNotePlayed"]; ok {
-			if coop_button, ok := coop_button_field.(bool); ok {
-				breakdown[alliance]["coopertitionCriteriaMet"] = coop_button && !config.Playoff
-			}
-		}
-
-		if coop_achieved_field, ok := breakdown[alliance]["coopertitionBonusAchieved"]; ok {
-			if coop_achieved, ok := coop_achieved_field.(bool); ok {
-				if coop_achieved {
-					breakdown[alliance]["melodyBonusThreshold"] = thresholds.MelodyBonusThresholdCoop
-				} else {
-					breakdown[alliance]["melodyBonusThreshold"] = thresholds.MelodyBonusThresholdNonCoop
-				}
-			}
-		}
-	}
+	// // fields determined by coopertition:
+	// for _, alliance := range []string{"blue", "red"} {
+	// 	if coop_button_field, ok := breakdown[alliance]["coopNotePlayed"]; ok {
+	// 		if coop_button, ok := coop_button_field.(bool); ok {
+	// 			breakdown[alliance]["coopertitionCriteriaMet"] = coop_button && !config.Playoff
+	// 		}
+	// 	}
 
 	if config.EnabledExtraRps != nil {
 		assignBreakdownExtraRps(breakdown, config.EnabledExtraRps, map[string][]bool{
