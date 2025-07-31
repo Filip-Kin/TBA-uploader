@@ -405,15 +405,30 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 
 				// begin year-specific
 			} else if row_name == "leave" {
-				assignBreakdownRobotFields(breakdown, "autoLineRobot", boolToYesNo, breakdownRobotFields[bool]{
+				values := breakdownRobotFields[bool]{
 					blue: iconsToBools(blue_cell, 3, "fa-check", "fa-times"),
 					red:  iconsToBools(red_cell, 3, "fa-check", "fa-times"),
-				})
+				}
+				assignBreakdownRobotFields(breakdown, "autoLineRobot", boolToYesNo, values)
+				err := assignBreakdownTotalFromMapping(breakdown, "autoMobilityPoints", values, map[bool]int{false: 0, true: 3})
+				if err != nil {
+					panic(fmt.Errorf("leave points: %v", err))
+				}
 			} else if row_name == "barge" {
-				assignBreakdownRobotFields(breakdown, "endGameRobot", identity_fn[string], breakdownRobotFields[string]{
+				values := breakdownRobotFields[string]{
 					blue: split_and_strip(blue_text, "\n"),
 					red:  split_and_strip(red_text, "\n"),
+				}
+				assignBreakdownRobotFields(breakdown, "endGameRobot", identity_fn[string], values)
+				err := assignBreakdownTotalFromMapping(breakdown, "endGameBargePoints", values, map[string]int{
+					"None":        0,
+					"Parked":      2,
+					"ShallowCage": 6,
+					"DeepCage":    12,
 				})
+				if err != nil {
+					panic(fmt.Errorf("barge points: %v", err))
+				}
 			} else if reef_row_field, ok := reefRowFields2025[row_name]; ok {
 				validateMatchPhase(match_phase)
 				reef_field := match_phase + "Reef"
