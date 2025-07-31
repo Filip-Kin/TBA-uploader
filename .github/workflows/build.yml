@@ -29,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
       - name: Install dependencies
@@ -56,31 +56,31 @@ jobs:
           echo "output_prefix=bin/release/$version/TBA-uploader-$version" >> "$GITHUB_OUTPUT"
       - name: Upload artifact (windows-x86_64)
         if: ${{ matrix.allow-upload }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-windows-x86_64.zip
           path: ${{steps.release.outputs.output_prefix}}-windows-x86_64.zip
       - name: Upload artifact (mac-x86_64)
         if: ${{ matrix.allow-upload }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-mac-x86_64.zip
           path: ${{steps.release.outputs.output_prefix}}-mac-x86_64.zip
       - name: Upload artifact (mac-arm64)
         if: ${{ matrix.allow-upload }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-mac-arm64.zip
           path: ${{steps.release.outputs.output_prefix}}-mac-arm64.zip
       - name: Upload artifact (linux-x86_64)
         if: ${{ matrix.allow-upload }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-linux-x86_64.zip
           path: ${{steps.release.outputs.output_prefix}}-linux-x86_64.zip
       - name: Upload artifact (linux-arm64)
         if: ${{ matrix.allow-upload }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-linux-arm64.zip
           path: ${{steps.release.outputs.output_prefix}}-linux-arm64.zip
