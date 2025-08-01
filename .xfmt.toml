@@ -1,0 +1,4 @@
+[[rule]]
+tags = ["js", "css", "source.css", "source.js", "text.html.vue", "text.html.svelte"]
+include = ["*.js", "*.css", "*.vue"]
+command = ["npx", "eslint_d", "--stdin", "--stdin-filename", "$file", "--fix-to-stdout"]

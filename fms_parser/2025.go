@@ -1,0 +1,447 @@
+package fms_parser
+
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path"
+	"runtime/debug"
+	"strconv"
+	"strings"
+
+	"github.com/PuerkitoBio/goquery"
+)
+
+type fmsScoreInfo2025 struct {
+	auto   int
+	teleop int
+	fouls  int
+	total  int
+	// year-specific:
+	baseRP int // win-loss-tie RP only
+}
+
+func makeFmsScoreInfo2025() fmsScoreInfo2025 {
+	return fmsScoreInfo2025{}
+}
+
+type extraMatchAllianceInfo2025 struct {
+	extraMatchAllianceInfoCommon
+}
+
+func makeExtraMatchAllianceInfo2025() extraMatchAllianceInfo2025 {
+	return extraMatchAllianceInfo2025{
+		extraMatchAllianceInfoCommon: makeExtraMatchAllianceInfoCommon(),
+	}
+}
+
+func addManualFields2025(breakdown map[string]interface{}, info fmsScoreInfo2025, extra extraMatchAllianceInfo2025, playoff bool) {
+	if _, ok := breakdown["adjustPoints"]; !ok {
+		// adjust should be negative when total = 0
+		breakdown["adjustPoints"] = info.total - info.auto - info.teleop - info.fouls
+	}
+
+	if !playoff {
+		if _, ok := breakdown["rp"]; !ok {
+			// assume this is a practice match
+			// TODO: check for presence of the bonus fields (these are not present in practice matches anyway)
+			breakdown["rp"] = info.baseRP
+		}
+	}
+}
+
+// map FMS names (lowercase) to API names of basic integer fields
+var simpleIntFields2025 = map[string]string{
+	// general
+	"adjustments": "adjustPoints",
+	// year-specific
+	"net algae":       "netAlgaeCount",
+	"processor algae": "wallAlgaeCount",
+}
+
+var penaltyFields2025 = map[string]string{
+	"G206": "g206Penalty",
+	"G410": "g410Penalty",
+	"G418": "g418Penalty",
+	"G428": "g428Penalty",
+}
+
+var skipRows2025 = map[string]bool{
+	"autonomous reef":    true,
+	"teleop reef":        true,
+	"coopertition bonus": true, // does not map to an API field
+}
+
+var DEFAULT_BREAKDOWN_VALUES_2025 = map[string]any{}
+
+// year-specific:
+
+var reefRowFields2025 = map[string]string{
+	"low branch":    "botRow",
+	"middle branch": "midRow",
+	"high branch":   "topRow",
+}
+
+type reef2025 struct {
+	BotRow      map[string]bool `json:"botRow"`
+	MidRow      map[string]bool `json:"midRow"`
+	TopRow      map[string]bool `json:"topRow"`
+	BotRowCount int             `json:"tba_botRowCount"`
+	MidRowCount int             `json:"tba_midRowCount"`
+	TopRowCount int             `json:"tba_topRowCount"`
+	TroughCount int             `json:"trough"`
+}
+
+func makeReef2025() *reef2025 {
+	return &reef2025{
+		BotRow: make(map[string]bool),
+		MidRow: make(map[string]bool),
+		TopRow: make(map[string]bool),
+	}
+}
+
+func assignReefRow(breakdown map[string]any, reef_field string, reef_row_field string, cell *goquery.Selection) {
+	reef := breakdown[reef_field].(*reef2025)
+	reefRow := make(map[string]bool)
+	reefValues := iconsToBools(cell, 12, "fa-check", "fa-circle-small")
+	count := 0
+	for i, val := range reefValues {
+		reefRow["node"+string(rune('A'+i))] = val
+		if val {
+			count++
+		}
+	}
+	vals := make(map[string]any)
+	vals[reef_row_field] = reefRow
+	vals["tba_"+reef_row_field+"Count"] = count
+	vals_enc, _ := json.Marshal(vals)
+	json.Unmarshal(vals_enc, &reef)
+}
+
+// in: point_values = [trough, bot, mid, top] (points per coral)
+// out: (points, number of coral)
+func calculateReefTotals(reef *reef2025, point_values [4]int) (int, int) {
+	count := 0
+	points := 0
+	add := func(num_coral, points_per_coral int) {
+		count += num_coral
+		points += num_coral * points_per_coral
+	}
+	add(reef.TroughCount, point_values[0])
+	add(reef.BotRowCount, point_values[1])
+	add(reef.MidRowCount, point_values[2])
+	add(reef.TopRowCount, point_values[3])
+
+	return points, count
+}
+
+var REEF_THRESHOLDS = map[string][4]int{
+	"auto":   {3, 4, 6, 7},
+	"teleop": {2, 3, 4, 5},
+}
+
+func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]interface{}, error) {
+	//////////////////////////////////////////////////
+	// Parse html from FMS into TBA-compatible JSON //
+	//////////////////////////////////////////////////
+
+	// Open file
+	r, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("Error opening file: %s: %s", filename, err)
+	}
+	defer r.Close()
+
+	// Read from file
+	dom, err := goquery.NewDocumentFromReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading from file: %s: %s", filename, err)
+	}
+
+	all_json := make(map[string]interface{})
+
+	extra_info := make(map[string]extraMatchAllianceInfo2025)
+	extra_info["blue"] = makeExtraMatchAllianceInfo2025()
+	extra_info["red"] = makeExtraMatchAllianceInfo2025()
+	extra_filename := filename[0:len(filename)-len(path.Ext(filename))] + ".extrajson"
+	extra_raw, err := ioutil.ReadFile(extra_filename)
+	if err == nil {
+		err = json.Unmarshal(extra_raw, &extra_info)
+		if err != nil {
+			return nil, fmt.Errorf("Error reading JSON from %s: %s", extra_filename, err)
+		}
+	}
+
+	alliances := map[string]map[string]interface{}{
+		"blue": {
+			"teams":      make([]string, 3),
+			"surrogates": extra_info["blue"].Surrogates,
+			"dqs":        extra_info["blue"].Dqs,
+			"score":      -1,
+		},
+		"red": {
+			"teams":      make([]string, 3),
+			"surrogates": extra_info["red"].Surrogates,
+			"dqs":        extra_info["red"].Dqs,
+			"score":      -1,
+		},
+	}
+
+	breakdown := map[string]map[string]interface{}{
+		"blue": make(map[string]interface{}),
+		"red":  make(map[string]interface{}),
+	}
+
+	var scoreInfo = struct {
+		blue fmsScoreInfo2025
+		red  fmsScoreInfo2025
+	}{
+		makeFmsScoreInfo2025(),
+		makeFmsScoreInfo2025(),
+	}
+
+	parse_errors := make([]string, 0)
+
+	checkParseInt := func(s, desc string) int {
+		n, err := strconv.ParseInt(s, 10, 0)
+		if err != nil {
+			panic(fmt.Sprintf("parse int %s failed: %s", desc, err))
+		}
+		return int(n)
+	}
+
+	match_phase := ""
+	validateMatchPhase := func(desc string) {
+		if match_phase == "" {
+			panic(fmt.Sprintf("no active match phase: %s", desc))
+		}
+	}
+
+	// year-specific:
+	breakdown["blue"]["autoReef"] = makeReef2025()
+	breakdown["blue"]["teleopReef"] = makeReef2025()
+	breakdown["red"]["autoReef"] = makeReef2025()
+	breakdown["red"]["teleopReef"] = makeReef2025()
+
+	dom.Find("tr").Each(func(i int, s *goquery.Selection) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("Parse error in %s: %s\n%s", filename, r, debug.Stack())
+				parse_errors = append(parse_errors, fmt.Sprint(r))
+			}
+		}()
+
+		columns := s.Children()
+		if columns.Length() < 1 {
+			return // continue
+		}
+
+		row_name := strings.ToLower(strings.TrimSpace(columns.Eq(0).Text()))
+		if row_name == "" || row_name == "match score item" {
+			return // continue
+		}
+
+		if columns.Length() == 3 {
+			if row_name == "leave" {
+				match_phase = "auto"
+			}
+
+			blue_cell := columns.Eq(1)
+			red_cell := columns.Eq(2)
+			blue_text := strings.TrimSpace(blue_cell.Text())
+			red_text := strings.TrimSpace(red_cell.Text())
+
+			parseIntWrapper := func(s, alliance string) int {
+				return checkParseInt(s, alliance+" "+row_name)
+			}
+
+			// Handle each data row
+			if api_field, ok := simpleIntFields2025[row_name]; ok {
+				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[int], breakdownAllianceFields[int]{
+					blue: checkParseInt(blue_text, "blue "+api_field),
+					red:  checkParseInt(red_text, "red "+api_field),
+				})
+			} else if _, ok := skipRows2025[row_name]; ok {
+				// skip
+			} else if row_name == "teams" {
+				assignTbaTeams(alliances, breakdownAllianceFields[*goquery.Selection]{
+					blue: blue_cell,
+					red:  red_cell,
+				})
+			} else if row_name == "final score" {
+				blue_score := checkParseInt(blue_text, "blue final score")
+				red_score := checkParseInt(red_text, "red final score")
+				breakdown["blue"]["totalPoints"] = blue_score
+				breakdown["red"]["totalPoints"] = red_score
+				alliances["blue"]["score"] = blue_score
+				alliances["red"]["score"] = red_score
+				scoreInfo.blue.total = blue_score
+				scoreInfo.red.total = red_score
+				if blue_score == red_score {
+					scoreInfo.blue.baseRP = 1
+					scoreInfo.red.baseRP = 1
+				} else if blue_score > red_score {
+					scoreInfo.blue.baseRP = 2
+					scoreInfo.red.baseRP = 0
+				} else {
+					scoreInfo.blue.baseRP = 0
+					scoreInfo.red.baseRP = 2
+				}
+			} else if row_name == "ranking points" {
+				for _, alliance := range []string{"blue", "red"} {
+					cell := blue_cell
+					if alliance == "red" {
+						cell = red_cell
+					}
+					rp, err := countRankingPoints(cell)
+					if err != nil {
+						panic(fmt.Errorf("%s ranking points: %s", alliance, err))
+					}
+
+					breakdown[alliance]["rp"] = rp
+
+					// year-specific:
+					if cell.Find("div.col-md-2").Length() >= 6 {
+						// RPs are icons
+						breakdown[alliance]["autoBonusAchieved"] = cell.Find("i.fa-robot").Length() >= 1
+						breakdown[alliance]["bargeBonusAchieved"] = cell.Find("i.fa-ship").Length() >= 1
+						breakdown[alliance]["coralBonusAchieved"] = cell.Find("i.fa-coral-solid").Length() >= 1
+					}
+				}
+			} else if row_name == "autonomous points" {
+				blue_points := checkParseInt(blue_text, "blue "+row_name)
+				red_points := checkParseInt(red_text, "red "+row_name)
+				assignBreakdownAllianceFields(breakdown, "autoPoints", identity_fn[int], breakdownAllianceFields[int]{
+					blue: blue_points,
+					red:  red_points,
+				})
+				scoreInfo.blue.auto = blue_points
+				scoreInfo.red.auto = red_points
+				match_phase = "teleop"
+			} else if row_name == "teleop points" {
+				blue_points := checkParseInt(blue_text, "blue "+row_name)
+				red_points := checkParseInt(red_text, "red "+row_name)
+				assignBreakdownAllianceFields(breakdown, "teleopPoints", identity_fn[int], breakdownAllianceFields[int]{
+					blue: blue_points,
+					red:  red_points,
+				})
+				scoreInfo.blue.teleop = blue_points
+				scoreInfo.red.teleop = red_points
+				match_phase = ""
+			} else if row_name == "foul points" {
+				blue_points := checkParseInt(blue_text, "blue "+row_name)
+				red_points := checkParseInt(red_text, "red "+row_name)
+				assignBreakdownAllianceFields(breakdown, "foulPoints", identity_fn[int], breakdownAllianceFields[int]{
+					blue: blue_points,
+					red:  red_points,
+				})
+				scoreInfo.blue.fouls = blue_points
+				scoreInfo.red.fouls = red_points
+			} else if row_name == "fouls committed" {
+				assignBreakdownAllianceMultipleFields(breakdown, []string{"foulCount", "techFoulCount"}, parseIntWrapper, breakdownAllianceMultipleFields[string]{
+					blue: split_and_strip(blue_text, "•"),
+					red:  split_and_strip(red_text, "•"),
+				})
+			} else if row_name == "penalties" {
+				assignPenaltyFields(breakdown, penaltyFields2025, breakdownAllianceFields[*goquery.Selection]{
+					blue: blue_cell,
+					red:  red_cell,
+				})
+
+				// begin year-specific
+			} else if row_name == "leave" {
+				values := breakdownRobotFields[bool]{
+					blue: iconsToBools(blue_cell, 3, "fa-check", "fa-times"),
+					red:  iconsToBools(red_cell, 3, "fa-check", "fa-times"),
+				}
+				assignBreakdownRobotFields(breakdown, "autoLineRobot", boolToYesNo, values)
+				err := assignBreakdownTotalFromMapping(breakdown, "autoMobilityPoints", values, map[bool]int{false: 0, true: 3})
+				if err != nil {
+					panic(fmt.Errorf("leave points: %v", err))
+				}
+			} else if row_name == "barge" {
+				values := breakdownRobotFields[string]{
+					blue: split_and_strip(blue_text, "\n"),
+					red:  split_and_strip(red_text, "\n"),
+				}
+				assignBreakdownRobotFields(breakdown, "endGameRobot", identity_fn[string], values)
+				err := assignBreakdownTotalFromMapping(breakdown, "endGameBargePoints", values, map[string]int{
+					"None":        0,
+					"Parked":      2,
+					"ShallowCage": 6,
+					"DeepCage":    12,
+				})
+				if err != nil {
+					panic(fmt.Errorf("barge points: %v", err))
+				}
+			} else if reef_row_field, ok := reefRowFields2025[row_name]; ok {
+				validateMatchPhase(match_phase)
+				reef_field := match_phase + "Reef"
+				assignReefRow(breakdown["red"], reef_field, reef_row_field, red_cell)
+				assignReefRow(breakdown["blue"], reef_field, reef_row_field, blue_cell)
+			} else if row_name == "trough" {
+				reef_field := match_phase + "Reef"
+				counts := map[string]int{
+					"blue": checkParseInt(blue_text, "blue "+row_name),
+					"red":  checkParseInt(red_text, "red "+row_name),
+				}
+				for alliance, count := range counts {
+					reef := breakdown[alliance][reef_field].(*reef2025)
+					reef.TroughCount = count
+				}
+			} else {
+				breakdown["blue"]["!"+row_name] = blue_text
+				breakdown["red"]["!"+row_name] = red_text
+			}
+		}
+	})
+
+	for _, alliance := range []string{"blue", "red"} {
+		auto_reef := breakdown[alliance]["autoReef"].(*reef2025)
+		teleop_reef := breakdown[alliance]["teleopReef"].(*reef2025)
+		auto_points, auto_count := calculateReefTotals(auto_reef, REEF_THRESHOLDS["auto"])
+		teleop_points, teleop_count := calculateReefTotals(teleop_reef, REEF_THRESHOLDS["teleop"])
+		// subtract off the teleop points for coral that were scored in auto
+		teleop_points_for_auto_coral, _ := calculateReefTotals(auto_reef, REEF_THRESHOLDS["teleop"])
+		teleop_points -= teleop_points_for_auto_coral
+
+		breakdown[alliance]["autoCoralPoints"] = auto_points
+		breakdown[alliance]["autoCoralCount"] = auto_count
+		breakdown[alliance]["teleopCoralPoints"] = teleop_points
+		breakdown[alliance]["teleopCoralCount"] = teleop_count
+
+		if wall_algae_count, ok := breakdown[alliance]["wallAlgaeCount"].(int); ok {
+			if net_algae_count, ok := breakdown[alliance]["netAlgaeCount"].(int); ok {
+				breakdown[alliance]["algaePoints"] = 6*wall_algae_count + 4*net_algae_count
+			}
+
+			// using default thresholds
+			breakdown[alliance]["coopertitionCriteriaMet"] = (wall_algae_count >= 2)
+		}
+	}
+
+	if config.EnabledExtraRps != nil {
+		assignBreakdownExtraRps(breakdown, config.EnabledExtraRps, map[string][]bool{
+			"red":  extra_info["red"].ExtraRps,
+			"blue": extra_info["blue"].ExtraRps,
+		}, "tba_extraRp")
+	}
+
+	if config.Playoff {
+		// set "rp" to 0 since the row is absent
+		assignBreakdownAllianceFieldsConst(breakdown, "rp", 0)
+	}
+
+	addManualFields2025(breakdown["blue"], scoreInfo.blue, extra_info["blue"], config.Playoff)
+	addManualFields2025(breakdown["red"], scoreInfo.red, extra_info["red"], config.Playoff)
+
+	if len(parse_errors) > 0 {
+		return nil, fmt.Errorf("Parse error (%d):\n%s", len(parse_errors), strings.Join(parse_errors, "\n"))
+	}
+
+	all_json["alliances"] = alliances
+	all_json["score_breakdown"] = breakdown
+
+	return all_json, nil
+}

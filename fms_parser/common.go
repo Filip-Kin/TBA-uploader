@@ -21,6 +21,7 @@ var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, erro
 	2022: parseHTMLtoJSON2022,
 	2023: parseHTMLtoJSON2023,
 	2024: parseHTMLtoJSON2024,
+	2025: parseHTMLtoJSON2025,
 }
 
 func ParseHTMLtoJSON(year int, filename string, config FMSParseConfig) (map[string]interface{}, error) {
@@ -312,9 +313,33 @@ func countRankingPoints(cell *goquery.Selection) (int, error) {
 		return int(n), nil
 	}
 
-	if cell.Find("div.col-md-3").Length() >= 4 {
-		return cell.Find("i.fas").Length(), nil
+	if cell.Find("div.col-md-2, div.col-md-3").Length() >= 4 {
+		return cell.Find("i.fas, i.fak").Length(), nil
 	}
 
 	return 0, fmt.Errorf("unrecognized RP format")
+}
+
+func calculateTotalFromMapping[T comparable](values []T, point_values map[T]int) (int, error) {
+	total := 0
+	for i, robot_value := range values {
+		points, ok := point_values[robot_value]
+		if !ok {
+			return 0, fmt.Errorf("unrecognized value for robot %d: %v", i+1, robot_value)
+		}
+		total += points
+	}
+	return total, nil
+}
+
+func assignBreakdownTotalFromMapping[T comparable](breakdowns map[string]map[string]interface{}, field string, values breakdownRobotFields[T], point_values map[T]int) error {
+	values_map := map[string][]T{"blue": values.blue, "red": values.red}
+	for alliance, alliance_values := range values_map {
+		alliance_total, err := calculateTotalFromMapping(alliance_values, point_values)
+		if err != nil {
+			return fmt.Errorf("%s %s: %v", field, alliance, err)
+		}
+		breakdowns[alliance][field] = alliance_total
+	}
+	return nil
 }

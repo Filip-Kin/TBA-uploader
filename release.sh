@@ -36,11 +36,7 @@ build_exe() {  # os arch exe src_dir build_dir
 }
 
 build_release() {  # os arch tag
-    if [ "$1" = "windows" ]; then
-        build_dir="$rel_dir/$1-$2"
-    else
-        build_dir="$rel_dir/$1-$2/TBA-uploader-$version-$3"
-    fi
+    build_dir="$rel_dir/$1-$2/TBA-uploader-$version-$3"
     mkdir -p "$build_dir"
     build_exe "$1" "$2" "TBA-uploader" "." "$build_dir"
     build_exe "$1" "$2" "autoav-helper" "./cmd/autoav-helper/" "$build_dir"
@@ -50,11 +46,6 @@ build_release() {  # os arch tag
     zip -r "$zip_name" *
     mv "$zip_name" ../
     popd >/dev/null
-    if [ "$1" != "windows" ]; then
-        echo "[$1/$2] Removing intermediate folder"
-        mv "$build_dir"/* "$build_dir/../"
-        rmdir "$build_dir"
-    fi
     echo "[$1/$2] Done"
 }
 

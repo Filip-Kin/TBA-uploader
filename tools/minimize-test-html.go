@@ -8,6 +8,11 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+var STRIP_ELEMENTS = []string{
+	"style",
+	"svg path",
+}
+
 var STRIP_CLASSES = []string{
 	"active",
 	"col-sm-4",
@@ -45,7 +50,9 @@ func main() {
 
 	doc, err := goquery.NewDocumentFromReader(reader)
 	table := doc.Find("table:has(*)").First()
-	table.Find("svg path").Remove()
+	for _, selector := range STRIP_ELEMENTS {
+		table.Find(selector).Remove()
+	}
 	table.Find("*").RemoveClass(STRIP_CLASSES...)
 	for _, attr := range STRIP_ATTRS {
 		table.Find("*").RemoveAttr(attr)
