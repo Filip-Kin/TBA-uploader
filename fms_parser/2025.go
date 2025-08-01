@@ -416,8 +416,10 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 				breakdown[alliance]["algaePoints"] = 6*wall_algae_count + 4*net_algae_count
 			}
 
+			has_g206, _ := breakdown[alliance]["g206Penalty"].(bool)
+
 			// using default thresholds
-			breakdown[alliance]["coopertitionCriteriaMet"] = (wall_algae_count >= 2)
+			breakdown[alliance]["coopertitionCriteriaMet"] = (wall_algae_count >= 2) && !has_g206
 		}
 	}
 
