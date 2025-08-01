@@ -53,40 +53,41 @@ jobs:
             suffix="-go${{ matrix.go-version }}"
           fi
           echo "version=$version$suffix" >> "$GITHUB_OUTPUT"
-          echo "output_prefix=bin/release/$version/TBA-uploader-$version" >> "$GITHUB_OUTPUT"
+          echo "output_bin_root=bin/release/$version" >> "$GITHUB_OUTPUT"
+          echo "output_zipfile_prefix=bin/release/$version/TBA-uploader-$version" >> "$GITHUB_OUTPUT"
       - name: Upload artifact (windows-x86_64)
         if: ${{ matrix.allow-upload }}
         uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-windows-x86_64.zip
-          path: ${{steps.release.outputs.output_prefix}}-windows-x86_64.zip
+          path: ${{steps.release.outputs.output_bin_root}}/windows-amd64/*
       - name: Upload artifact (mac-x86_64)
         if: ${{ matrix.allow-upload }}
         uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-mac-x86_64.zip
-          path: ${{steps.release.outputs.output_prefix}}-mac-x86_64.zip
+          path: ${{steps.release.outputs.output_bin_root}}/darwin-amd64/*
       - name: Upload artifact (mac-arm64)
         if: ${{ matrix.allow-upload }}
         uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-mac-arm64.zip
-          path: ${{steps.release.outputs.output_prefix}}-mac-arm64.zip
+          path: ${{steps.release.outputs.output_bin_root}}/darwin-arm64/*
       - name: Upload artifact (linux-x86_64)
         if: ${{ matrix.allow-upload }}
         uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-linux-x86_64.zip
-          path: ${{steps.release.outputs.output_prefix}}-linux-x86_64.zip
+          path: ${{steps.release.outputs.output_bin_root}}/linux-amd64/*
       - name: Upload artifact (linux-arm64)
         if: ${{ matrix.allow-upload }}
         uses: actions/upload-artifact@v4
         with:
           name: TBA-uploader-${{steps.release.outputs.version}}-linux-arm64.zip
-          path: ${{steps.release.outputs.output_prefix}}-linux-arm64.zip
+          path: ${{steps.release.outputs.output_bin_root}}/linux-arm64/*
       - name: Publish release
         uses: softprops/action-gh-release@v1
         if: ${{ matrix.allow-release && startsWith(github.ref, 'refs/tags/v') }}
         with:
           files: |
-            ${{steps.release.outputs.output_prefix}}-*.zip
+            ${{steps.release.outputs.output_zipfile_prefix}}-*.zip
