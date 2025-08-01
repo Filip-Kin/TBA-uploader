@@ -58,40 +58,6 @@ var simpleIntFields2025 = map[string]string{
 	// year-specific
 	"net algae":       "netAlgaeCount",
 	"processor algae": "wallAlgaeCount",
-	// "leave points":                    "autoLeavePoints",
-	// "speaker note amplified count":    "teleopSpeakerNoteAmplifiedCount",
-	// "speaker note amplified points":   "teleopSpeakerNoteAmplifiedPoints",
-	// "endgame harmony points":          "endGameHarmonyPoints",
-	// "endgame note in trap points":     "endGameNoteInTrapPoints",
-	// "endgame on stage points":         "endGameOnStagePoints",
-	// "endgame park points":             "endGameParkPoints",
-	// "endgame spot light bonus points": "endGameSpotLightBonusPoints",
-}
-
-// Map FMS names (lowercase) to API name suffixes of basic integer fields.
-// The match phase ("auto" or "teleop") will be prepended to the API names as appropriate.
-var simpleIntMatchPhaseFields2025 = map[string]string{
-	// "amp note count":                   "AmpNoteCount",
-	// "amp note points":                  "AmpNotePoints",
-	// "speaker note count":               "SpeakerNoteCount",
-	// "speaker note un-amplified count":  "SpeakerNoteCount",
-	// "speaker note points":              "SpeakerNotePoints",
-	// "speaker note un-amplified points": "SpeakerNotePoints",
-}
-
-var totalIntFields2025 = map[string][]string{
-	// "autoTotalNotePoints":     {"autoAmpNotePoints", "autoSpeakerNotePoints"},
-	// "teleopTotalNotePoints":   {"teleopAmpNotePoints", "teleopSpeakerNotePoints", "teleopSpeakerNoteAmplifiedPoints"},
-	// "endGameTotalStagePoints": {"endGameParkPoints", "endGameOnStagePoints", "endGameSpotLightBonusPoints", "endGameHarmonyPoints", "endGameNoteInTrapPoints"},
-}
-
-var simpleStringFields2025 = map[string]string{}
-
-var simpleIconFields2025 = map[string]string{
-	// "coop button pressed": "coopNotePlayed",
-	// "coopertition bonus":  "coopertitionBonusAchieved",
-	// "ensemble":            "ensembleBonusAchieved",
-	// "melody":              "melodyBonusAchieved",
 }
 
 var penaltyFields2025 = map[string]string{
@@ -102,8 +68,9 @@ var penaltyFields2025 = map[string]string{
 }
 
 var skipRows2025 = map[string]bool{
-	"autonomous reef": true,
-	"teleop reef":     true,
+	"autonomous reef":    true,
+	"teleop reef":        true,
+	"coopertition bonus": true, // does not map to an API field
 }
 
 var DEFAULT_BREAKDOWN_VALUES_2025 = map[string]any{}
@@ -290,31 +257,10 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 			}
 
 			// Handle each data row
-			if api_field, ok := simpleStringFields2025[row_name]; ok {
-				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[string], breakdownAllianceFields[string]{
-					blue: blue_text,
-					red:  red_text,
-				})
-			} else if api_field, ok := simpleIntFields2025[row_name]; ok {
+			if api_field, ok := simpleIntFields2025[row_name]; ok {
 				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[int], breakdownAllianceFields[int]{
 					blue: checkParseInt(blue_text, "blue "+api_field),
 					red:  checkParseInt(red_text, "red "+api_field),
-				})
-			} else if api_field_suffix, ok := simpleIntMatchPhaseFields2025[row_name]; ok {
-				validateMatchPhase(match_phase)
-				api_field := match_phase + api_field_suffix
-				assignBreakdownAllianceFields(breakdown, api_field, identity_fn[int], breakdownAllianceFields[int]{
-					blue: checkParseInt(blue_text, "blue "+api_field),
-					red:  checkParseInt(red_text, "red "+api_field),
-				})
-			} else if api_field, ok := simpleIconFields2025[row_name]; ok {
-				success_icon := "fa-check"
-				if blue_cell.AddSelection(red_cell).Find("i.fa-handshake").Length() >= 1 {
-					success_icon = "fa-handshake"
-				}
-				assignBreakdownAllianceFields[bool](breakdown, api_field, identity_fn[bool], breakdownAllianceFields[bool]{
-					blue: iconToBool(blue_cell.Find("i"), success_icon, "fa-times"),
-					red:  iconToBool(red_cell.Find("i"), success_icon, "fa-times"),
 				})
 			} else if _, ok := skipRows2025[row_name]; ok {
 				// skip
@@ -444,22 +390,12 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 					reef := breakdown[alliance][reef_field].(*reef2025)
 					reef.TroughCount = count
 				}
-			} else if row_name == "coopertition bonus" {
-				// does not map to an API field
 			} else {
 				breakdown["blue"]["!"+row_name] = blue_text
 				breakdown["red"]["!"+row_name] = red_text
 			}
 		}
 	})
-
-	for total_field, component_fields := range totalIntFields2025 {
-		err := assignTotalField(breakdown, total_field, component_fields)
-		if err != nil {
-			fmt.Printf("Parse error in %s: assignTotalField: %v\n", filename, err)
-			parse_errors = append(parse_errors, fmt.Sprintf("assignTotalField: %v", err))
-		}
-	}
 
 	for _, alliance := range []string{"blue", "red"} {
 		auto_reef := breakdown[alliance]["autoReef"].(*reef2025)
@@ -484,14 +420,6 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 			breakdown[alliance]["coopertitionCriteriaMet"] = (wall_algae_count >= 2)
 		}
 	}
-
-	// // fields determined by coopertition:
-	// for _, alliance := range []string{"blue", "red"} {
-	// 	if coop_button_field, ok := breakdown[alliance]["coopNotePlayed"]; ok {
-	// 		if coop_button, ok := coop_button_field.(bool); ok {
-	// 			breakdown[alliance]["coopertitionCriteriaMet"] = coop_button && !config.Playoff
-	// 		}
-	// 	}
 
 	if config.EnabledExtraRps != nil {
 		assignBreakdownExtraRps(breakdown, config.EnabledExtraRps, map[string][]bool{
