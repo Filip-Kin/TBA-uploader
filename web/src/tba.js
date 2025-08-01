@@ -8,7 +8,8 @@ function toNumber(value) {
 /*
 interface for ranking reducers:
 {
-    add: function(matchResult, alliance: 'red'|'blue', teamKey: 'frc####'),
+    add: function(matchResult, alliance: 'red'|'blue', teamKey: 'frc####')  : add a match result
+    addConst: function(constValue)  : add a constant value (used for adding 0 for DQed teams)
     get: function() => ranking report cell value
 }
 */
@@ -49,6 +50,23 @@ function RankingReducerAverage(breakdownFields, defaultValue=-1) {
     };
 }
 
+function RankingReducerBooleanBothAlliances(field) {
+    return function() {
+        const matchValues = [];
+        return {
+            add(match, alliance) {
+                matchValues.push(Number(match.score_breakdown.red[field] && match.score_breakdown.blue[field]));
+            },
+            addConst(value) {
+                matchValues.push(value);
+            },
+            get() {
+                return matchValues.reduce((a, b) => (a + b), 0) / matchValues.length;
+            },
+        };
+    };
+}
+
 const rankingBreakdownSources = {
     2022: {
         'Ranking Score': RankingReducerAverage('rp'),
@@ -71,10 +89,10 @@ const rankingBreakdownSources = {
     },
     2025: {
         'Ranking Score': RankingReducerAverage('rp'),
-        // 'Avg Coop': RankingReducerAverage(['coopertitionBonusAchieved']), needs both alliances??
+        'Avg Coop': RankingReducerBooleanBothAlliances(['coopertitionCriteriaMet']),
         'Avg Match': RankingReducerAverage(['totalPoints', '-foulPoints']),
-        'Avg Auto': RankingReducerAverage(['autoPoints']),  // autoCoralPoints + autoMobilityPoints ??
-        'Avg Barge': RankingReducerAverage(['endGameBargePoints']),  // ?
+        'Avg Auto': RankingReducerAverage(['autoPoints']),
+        'Avg Barge': RankingReducerAverage(['endGameBargePoints']),
     },
 };
 
