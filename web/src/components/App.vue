@@ -2888,7 +2888,11 @@ export default {
             this.inUploadRankings = true;
             this.rankingsGeneratedMessageHtml = '';
             try {
-                const matchResults = (await this.tbaApiCurrentEventRequest('matches')).filter(m => m.comp_level == 'qm');
+                const matchResults = (await this.tbaApiCurrentEventRequest('matches')).filter(m => (
+                    m.comp_level == 'qm' &&
+                    m.alliances.red.score != -1 &&
+                    m.alliances.blue.score != -1
+                ));
                 this.convertMatchTeamKeysTBAtoFMS(matchResults);
                 this.rankingsReportData = this.rankingsReportTable = tba.generateRankingsFromMatchResults(matchResults, this.eventYear, this.eventExtras[this.selectedEvent].rp_settings);
                 this.rankingsGeneratedMessageHtml = 'Rankings generated from <strong>' + matchResults.length + '</strong> matches';
