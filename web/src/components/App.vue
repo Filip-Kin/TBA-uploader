@@ -313,6 +313,11 @@
                         >
                             <b-form-checkbox v-model="eventExtras[selectedEvent].rp_settings.rank_ties_same">Give teams with all ranking criteria tied the the same rank (instead of breaking ties randomly)</b-form-checkbox>
                         </form>
+                        <form
+                            class="form-inline"
+                        >
+                            <b-form-checkbox v-model="eventExtras[selectedEvent].rp_settings.disable_coop">Disable Co-op</b-form-checkbox>
+                        </form>
 
                         <h3 class="mt-2">Practice Match Settings</h3>
                         Use these settings to allow playing qual and/or playoff matches as practice matches.
@@ -1521,6 +1526,7 @@ const DEFAULT_PRACTICE_SETTINGS = Object.freeze({
 });
 const DEFAULT_RP_SETTINGS = Object.freeze({
     rank_ties_same: false,
+    disable_coop: false,
 });
 
 const BRACKET_TYPE_CUSTOM_START = 1000;
@@ -1871,6 +1877,7 @@ export default {
         shouldUseTbaRankings() {
             return this.anyEnabledExtraRps ||
                 this.eventExtras[this.selectedEvent].rp_settings.rank_ties_same ||
+                this.eventExtras[this.selectedEvent].rp_settings.disable_coop ||
                 (this.matchLevel == MATCH_LEVEL.PRACTICE && this.practiceMatchPlayEnabled);
         },
     },

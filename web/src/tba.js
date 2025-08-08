@@ -317,6 +317,15 @@ const tba = Object.freeze({
             }
         }
 
+        if (flags.disable_coop) {
+            for (const r of Object.values(rankings)) {
+                // TODO: don't hardcode the key
+                if (Object.hasOwn(r, "Avg Coop")) {
+                    r["Avg Coop"] = -1;
+                }
+            }
+        }
+
         const compareRank = function(a, b) {
             for (const field of tba.RANKING_NAMES[year]) {
                 if (a[field] != b[field]) {
