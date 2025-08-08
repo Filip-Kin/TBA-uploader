@@ -34,6 +34,11 @@ type PracticeSettings struct {
 	FirstPlayoff int `json:"first_playoff"`
 }
 
+type RpSettings struct {
+	RpWin int `json:"rp_win"`
+	RpTie int `json:"rp_tie"`
+}
+
 func apiPanicCode(code int, message string, args ...interface{}) {
 	logger.Printf("API Error %d: "+message, append([]interface{}{code}, args...)...)
 	panic(APIError{
@@ -268,6 +273,14 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 			apiPanicBadRequest("could not parse practice_settings: %v", err)
 		}
 	}
+	rp_settings := RpSettings{}
+	rp_settings_str := r.URL.Query().Get("rp_settings")
+	if rp_settings_str != "" {
+		err := json.Unmarshal([]byte(rp_settings_str), &rp_settings)
+		if err != nil {
+			apiPanicBadRequest("could not parse rp_settings: %v", err)
+		}
+	}
 
 	var files []string
 	var err error
@@ -320,6 +333,8 @@ func apiFetchMatches(w http.ResponseWriter, r *http.Request) {
 			match_info, err := fms_parser.ParseHTMLtoJSON(event_year, files[i], fms_parser.FMSParseConfig{
 				Playoff:         is_playoff,
 				EnabledExtraRps: enabled_extra_rps,
+				RpWin:           rp_settings.RpWin,
+				RpTie:           rp_settings.RpTie,
 			})
 			if err != nil {
 				apiPanicInternal("failed to parse %s: %s", fname, err)

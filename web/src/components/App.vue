@@ -313,6 +313,22 @@
                         >
                             <b-form-checkbox v-model="eventExtras[selectedEvent].rp_settings.rank_ties_same">Give teams with all ranking criteria tied the the same rank (instead of breaking ties randomly)</b-form-checkbox>
                         </form>
+                        <form
+                            class="form-inline"
+                        >
+                            <label>RP for win: <b-form-input
+                                v-model="eventExtras[selectedEvent].rp_settings.rp_win"
+                                type="number"
+                                number
+                                style="width: 5em"
+                            /></label>
+                            <label>RP for tie: <b-form-input
+                                v-model="eventExtras[selectedEvent].rp_settings.rp_tie"
+                                type="number"
+                                number
+                                style="width: 5em"
+                            /></label>
+                        </form>
 
                         <h3 class="mt-2">Practice Match Settings</h3>
                         Use these settings to allow playing qual and/or playoff matches as practice matches.
@@ -1521,6 +1537,8 @@ const DEFAULT_PRACTICE_SETTINGS = Object.freeze({
 });
 const DEFAULT_RP_SETTINGS = Object.freeze({
     rank_ties_same: false,
+    rp_win: 3,
+    rp_tie: 1,
 });
 
 const BRACKET_TYPE_CUSTOM_START = 1000;
@@ -1788,6 +1806,16 @@ export default {
         },
         anyEnabledExtraRps: function() {
             return this.enabledExtraRps.find(Boolean);
+        },
+        rpSettingsSanitized: function() {
+            const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].rp_settings;
+            if (settings) {
+                return {
+                    rp_win: Number(settings.rp_win) || DEFAULT_RP_SETTINGS.rp_win,
+                    rp_tie: Number(settings.rp_tie) || DEFAULT_RP_SETTINGS.rp_tie,
+                };
+            }
+            return {...DEFAULT_RP_SETTINGS};
         },
         practiceSettingsSanitized: function() {
             const settings = this.eventExtras[this.selectedEvent] && this.eventExtras[this.selectedEvent].practice_settings;
@@ -2057,10 +2085,11 @@ export default {
                 alliance_count: 8,
                 alliance_size: 3,
                 enabled_extra_rps: DEFAULT_ENABLED_EXTRA_RPS.slice(),
-                practice_settings: {...DEFAULT_PRACTICE_SETTINGS},
-                rp_settings: {...DEFAULT_RP_SETTINGS},
                 video_prefix: '',
             }, this.eventExtras[event]));
+
+            this.eventExtras[event].practice_settings = $.extend({}, DEFAULT_PRACTICE_SETTINGS, this.eventExtras[event].practice_settings);
+            this.eventExtras[event].rp_settings = $.extend({}, DEFAULT_RP_SETTINGS, this.eventExtras[event].rp_settings);
 
             if (!this.alliances[event]) {
                 this.$set(this.alliances, event, []);
@@ -2431,6 +2460,7 @@ export default {
                     playoff_type: this.eventPlayoffType,
                     enabled_extra_rps: this.enabledExtraRps.join(','),
                     practice_settings: JSON.stringify(this.practiceSettingsSanitized),
+                    rp_settings: JSON.stringify(this.rpSettingsSanitized),
                     all: all ? '1' : '',
                 });
                 this.pendingMatches = JSON.parse(data);

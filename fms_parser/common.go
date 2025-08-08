@@ -13,6 +13,8 @@ import (
 type FMSParseConfig struct {
 	Playoff         bool
 	EnabledExtraRps []bool
+	RpWin           int
+	RpTie           int
 }
 
 var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, error){
