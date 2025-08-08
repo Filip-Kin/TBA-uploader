@@ -405,6 +405,8 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 		// subtract off the teleop points for coral that were scored in auto
 		teleop_points_for_auto_coral, _ := calculateReefTotals(auto_reef, REEF_THRESHOLDS["teleop"])
 		teleop_points -= teleop_points_for_auto_coral
+		// hack: FMS still includes auto trough coral in teleopCoralPoints, but not teleopCoralCount
+		teleop_points += auto_reef.TroughCount * REEF_THRESHOLDS["teleop"][0]
 
 		breakdown[alliance]["autoCoralPoints"] = auto_points
 		breakdown[alliance]["autoCoralCount"] = auto_count
@@ -433,6 +435,13 @@ func parseHTMLtoJSON2025(filename string, config FMSParseConfig) (map[string]int
 	if config.Playoff {
 		// set "rp" to 0 since the row is absent
 		assignBreakdownAllianceFieldsConst(breakdown, "rp", 0)
+
+		// set bonus fields to false, since FMS does this but we have not yet
+		for _, alliance := range []string{"red", "blue"} {
+			for _, field := range []string{"autoBonusAchieved", "bargeBonusAchieved", "coralBonusAchieved"} {
+				breakdown[alliance][field] = false
+			}
+		}
 	}
 
 	addManualFields2025(breakdown["blue"], scoreInfo.blue, extra_info["blue"], config.Playoff)
