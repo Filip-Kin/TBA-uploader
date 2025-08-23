@@ -67,8 +67,13 @@ var playoffRounds = map[int][]playoffRoundInfo{
 		{level: "f", sets: 1, matches_per_set: 6},
 	},
 	BRACKET_TYPE_CUSTOM: {},
-	BRACKET_TYPE_X_KETTERING_ALLSTAR: {
+	BRACKET_TYPE_X_KETTERING_ALLSTAR_8_TEAM: {
 		{level: "ef", sets: 2, matches_per_set: 3},
+		{level: "qf", sets: 2, matches_per_set: 3},
+		{level: "sf", sets: 2, matches_per_set: 3},
+		{level: "f", sets: 1, matches_per_set: 6},
+	},
+	BRACKET_TYPE_X_KETTERING_ALLSTAR_6_TEAM: {
 		{level: "qf", sets: 2, matches_per_set: 3},
 		{level: "sf", sets: 2, matches_per_set: 3},
 		{level: "f", sets: 1, matches_per_set: 6},

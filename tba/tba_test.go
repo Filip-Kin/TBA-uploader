@@ -140,7 +140,7 @@ func TestPlayoffCodesCustom(t *testing.T) {
 	testBracket(t, playoff_codes_custom, BRACKET_TYPE_CUSTOM, BRACKET_NAME_CUSTOM)
 }
 
-var playoff_codes_custom_kas = Bracket{
+var playoff_codes_custom_kas_8 = Bracket{
 	1: {Level: "ef", Set: 1, Match: 1},
 	2: {Level: "ef", Set: 2, Match: 1},
 	3: {Level: "ef", Set: 1, Match: 2},
@@ -170,6 +170,33 @@ var playoff_codes_custom_kas = Bracket{
 	24: {Level: "f", Set: 1, Match: 6},
 }
 
-func TestPlayoffCodesCustomKAS(t *testing.T) {
-	testBracket(t, playoff_codes_custom_kas, BRACKET_TYPE_X_KETTERING_ALLSTAR, BRACKET_NAME_X_KETTERING_ALLSTAR)
+func TestPlayoffCodesCustomKAS8(t *testing.T) {
+	testBracket(t, playoff_codes_custom_kas_8, BRACKET_TYPE_X_KETTERING_ALLSTAR_8_TEAM, BRACKET_NAME_X_KETTERING_ALLSTAR_8_TEAM)
+}
+
+var playoff_codes_custom_kas_6 = Bracket{
+	1: {Level: "qf", Set: 1, Match: 1},
+	2: {Level: "qf", Set: 2, Match: 1},
+	3: {Level: "qf", Set: 1, Match: 2},
+	4: {Level: "qf", Set: 2, Match: 2},
+	5: {Level: "qf", Set: 1, Match: 3},
+	6: {Level: "qf", Set: 2, Match: 3},
+
+	7:  {Level: "sf", Set: 1, Match: 1},
+	8:  {Level: "sf", Set: 2, Match: 1},
+	9:  {Level: "sf", Set: 1, Match: 2},
+	10: {Level: "sf", Set: 2, Match: 2},
+	11: {Level: "sf", Set: 1, Match: 3},
+	12: {Level: "sf", Set: 2, Match: 3},
+
+	13: {Level: "f", Set: 1, Match: 1},
+	14: {Level: "f", Set: 1, Match: 2},
+	15: {Level: "f", Set: 1, Match: 3},
+	16: {Level: "f", Set: 1, Match: 4},
+	17: {Level: "f", Set: 1, Match: 5},
+	18: {Level: "f", Set: 1, Match: 6},
+}
+
+func TestPlayoffCodesCustomKAS6(t *testing.T) {
+	testBracket(t, playoff_codes_custom_kas_6, BRACKET_TYPE_X_KETTERING_ALLSTAR_6_TEAM, BRACKET_NAME_X_KETTERING_ALLSTAR_6_TEAM)
 }
