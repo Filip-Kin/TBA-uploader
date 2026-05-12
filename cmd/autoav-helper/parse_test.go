@@ -94,7 +94,7 @@ func TestOrderKey(t *testing.T) {
 }
 
 func TestIncludeLevel(t *testing.T) {
-	cfg := eventConfig{IncludePractice: false, IncludeTest: false, IncludeManual: false}
+	cfg := eventConfig{IncludePractice: false, IncludeTest: false}
 	p, _ := parseFilename("2026 X Qualification Match 5.mp4")
 	if !p.includeLevel(cfg) {
 		t.Fatal("qual should always be included")
@@ -106,5 +106,9 @@ func TestIncludeLevel(t *testing.T) {
 	cfg.IncludePractice = true
 	if !prac.includeLevel(cfg) {
 		t.Fatal("practice should be included when IncludePractice=true")
+	}
+	man, _ := parseFilename("2026 X Manual Match 1.mp4")
+	if man.includeLevel(cfg) {
+		t.Fatal("manual recordings should always be excluded")
 	}
 }

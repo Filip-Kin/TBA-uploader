@@ -83,8 +83,10 @@ func (m *uploadManager) scanLoop() {
 // scanNow does one folder scan: discovers new files, updates stability, and
 // promotes entries whose size+mtime have been unchanged long enough.
 func (m *uploadManager) scanNow() {
-	st := m.store.snapshot()
-	dir := st.Config.VideoDir
+	// Watch the same folder AutoAV records to (settings.VideoDir, set by
+	// the -video-dir flag or the legacy /save endpoint). No need to
+	// duplicate it in per-event config.
+	dir := settings.VideoDir
 	if dir == "" {
 		return
 	}
@@ -200,7 +202,7 @@ func (m *uploadManager) uploadOne() {
 	defer cancel()
 
 	result, err := m.driver.Upload(ctx, cfg.ProfileName, ytstudio.UploadInput{
-		VideoPath:     filepath.Join(cfg.VideoDir, target.filename),
+		VideoPath:     filepath.Join(settings.VideoDir, target.filename),
 		Title:         target.title,
 		Description:   target.description,
 		ThumbnailPath: cfg.ThumbnailPath,

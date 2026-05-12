@@ -66,6 +66,8 @@ func (p parsedFilename) playSuffix() string {
 }
 
 // includeLevel decides whether this filename's level passes the include_* config.
+// Manual recordings are always skipped — they're ad-hoc recordings made
+// outside the regular match flow and shouldn't be auto-uploaded.
 func (p parsedFilename) includeLevel(cfg eventConfig) bool {
 	switch strings.ToLower(p.Level) {
 	case "qualification", "playoff", "final":
@@ -74,8 +76,6 @@ func (p parsedFilename) includeLevel(cfg eventConfig) bool {
 		return cfg.IncludePractice
 	case "test":
 		return cfg.IncludeTest
-	case "manual":
-		return cfg.IncludeManual
 	}
 	return false
 }

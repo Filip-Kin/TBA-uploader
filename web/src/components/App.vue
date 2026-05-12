@@ -1017,28 +1017,10 @@
                         </div>
                         <div class="form-inline">
                             <label>
-                                Expected channel:
-                                <b-form-input
-                                    v-model="ytUploadConfig.channel_check"
-                                    @change="ytSaveConfig"
-                                />
-                            </label>
-                        </div>
-                        <div class="form-inline">
-                            <label>
                                 Playlist name:
                                 <b-form-input
                                     v-model="ytUploadConfig.playlist_name"
                                     placeholder="exact playlist name as shown in YT Studio"
-                                    @change="ytSaveConfig"
-                                />
-                            </label>
-                        </div>
-                        <div class="form-inline">
-                            <label>
-                                Watch folder:
-                                <b-form-input
-                                    v-model="ytUploadConfig.video_dir"
                                     @change="ytSaveConfig"
                                 />
                             </label>
@@ -1087,12 +1069,6 @@
                                 @change="ytSaveConfig"
                             >
                                 Include Test matches
-                            </b-form-checkbox>
-                            <b-form-checkbox
-                                v-model="ytUploadConfig.include_manual"
-                                @change="ytSaveConfig"
-                            >
-                                Include Manual matches
                             </b-form-checkbox>
                             <b-form-checkbox v-model="ytAutoSubmitToTba">
                                 Auto-submit to TBA after each upload
@@ -1895,14 +1871,11 @@ export default {
         ytUploadConfig: {
             profile_name: '',
             playlist_name: '',
-            channel_check: '',
-            video_dir: '',
             title_template: '',
             description_template: '',
             thumbnail_path: '',
             include_practice: false,
             include_test: false,
-            include_manual: false,
         },
         ytUploadState: null,
         ytProfiles: [],
@@ -3685,14 +3658,11 @@ export default {
                 this.ytUploadConfig = Object.assign({
                     profile_name: '',
                     playlist_name: '',
-                    channel_check: '',
-                    video_dir: '',
                     title_template: '',
                     description_template: '',
                     thumbnail_path: '',
                     include_practice: false,
                     include_test: false,
-                    include_manual: false,
                 }, r || {});
             } catch (e) {
                 // ignore
@@ -3756,13 +3726,7 @@ export default {
                 if (r.error) {
                     this.ytChannelStatus = 'Error: ' + r.error;
                 } else {
-                    const name = r.channel_name || '(unknown)';
-                    const expected = (this.ytUploadConfig.channel_check || '').trim();
-                    if (expected && name.toLowerCase() !== expected.toLowerCase()) {
-                        this.ytChannelStatus = 'Wrong channel: "' + name + '" (expected "' + expected + '")';
-                    } else {
-                        this.ytChannelStatus = 'OK: ' + name;
-                    }
+                    this.ytChannelStatus = 'Logged in as: ' + (r.channel_name || '(unknown)');
                 }
             } catch (e) {
                 this.ytChannelStatus = 'Check failed: ' + utils.parseErrorText(e);

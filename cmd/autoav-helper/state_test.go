@@ -18,7 +18,7 @@ func TestStateStoreRoundtrip(t *testing.T) {
 		t.Fatalf("event key not set")
 	}
 	if err := s.update(func(es *eventState) {
-		es.Config.VideoDir = "/x"
+		es.Config.ProfileName = "scratch"
 		es.Config.PlaylistName = "Test"
 		es.Videos["foo.mp4"] = &videoEntry{Size: 100, Status: statusStable}
 		es.ManualVideoIDs["qm5"] = "abc11char23"
@@ -32,7 +32,7 @@ func TestStateStoreRoundtrip(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	got := s2.snapshot()
-	if got.Config.VideoDir != "/x" || got.Config.PlaylistName != "Test" {
+	if got.Config.ProfileName != "scratch" || got.Config.PlaylistName != "Test" {
 		t.Errorf("config not persisted: %+v", got.Config)
 	}
 	if got.Videos["foo.mp4"].Size != 100 {

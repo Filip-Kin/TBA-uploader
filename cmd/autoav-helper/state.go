@@ -28,16 +28,13 @@ const (
 type eventConfig struct {
 	EventKey            string `json:"event_key"`
 	EventName           string `json:"event_name"`
-	VideoDir            string `json:"video_dir"`
 	ProfileName         string `json:"profile_name"`
 	PlaylistName        string `json:"playlist_name"`
-	ChannelCheck        string `json:"channel_check"`
 	TitleTemplate       string `json:"title_template"`
 	DescriptionTemplate string `json:"description_template"`
 	ThumbnailPath       string `json:"thumbnail_path"`
 	IncludePractice     bool   `json:"include_practice"`
 	IncludeTest         bool   `json:"include_test"`
-	IncludeManual       bool   `json:"include_manual"`
 }
 
 // allianceTeam is one team's data inside a match's red or blue alliance.
