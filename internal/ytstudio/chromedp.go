@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
@@ -110,18 +112,24 @@ func (d *ChromedpDriver) allocate(ctx context.Context, profileName string, headl
 		chromedp.NoSandbox,
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
+		// Kills the navigator.webdriver tell at the Blink level; the
+		// applyStealth init script handles anything that flag misses.
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("no-restore-last-session", true),
 		chromedp.Flag("restore-last-session", "false"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.WindowSize(1400, 900),
-		// Without an explicit UA, headless Chrome advertises "HeadlessChrome/…"
-		// and YouTube Studio serves an "unsupported browser" upsell instead
-		// of the real UI. Override to a vanilla Windows Chrome UA.
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
 	}
 	if headless {
-		opts = append(opts, chromedp.Headless)
+		// Headless Chrome advertises "HeadlessChrome/…" and YT Studio bounces
+		// us to an unsupported-browser page. A spoofed UA fixes that path,
+		// but the spoof itself is a fingerprintable mismatch against the
+		// browser's Client Hints — so we only apply it here, not in headed
+		// runs where Brave's native UA passes the check on its own.
+		opts = append(opts,
+			chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+			chromedp.Headless,
+		)
 	} else {
 		opts = append(opts, chromedp.Flag("headless", false))
 	}
@@ -154,6 +162,7 @@ func (d *ChromedpDriver) Login(ctx context.Context, profileName string) error {
 	defer cancelBrowser()
 
 	if err := chromedp.Run(browserCtx,
+		applyStealth(),
 		chromedp.Navigate("https://studio.youtube.com"),
 	); err != nil {
 		return err
@@ -181,6 +190,7 @@ func (d *ChromedpDriver) CheckChannel(ctx context.Context, profileName string) (
 
 	var currentURL, channelName string
 	err = chromedp.Run(bctx,
+		applyStealth(),
 		chromedp.Navigate("https://studio.youtube.com"),
 		chromedp.Sleep(2*time.Second),
 		chromedp.Location(&currentURL),
@@ -238,6 +248,7 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 	// Step 1: navigate to YT Studio and check we're signed in.
 	d.logf("step 1: navigate to studio")
 	if err := chromedp.Run(bctx,
+		applyStealth(),
 		chromedp.Navigate("https://studio.youtube.com"),
 		chromedp.Sleep(3*time.Second),
 		chromedp.Location(&currentURL),
@@ -390,8 +401,9 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	}
 	d.logf("playlist: trigger at (%.0f,%.0f) %s", tx, ty, trigInfo)
 	if err := chromedp.Run(ctx,
-		chromedp.MouseClickXY(tx, ty),
-		chromedp.Sleep(1500*time.Millisecond),
+		humanSleep(150*time.Millisecond, 400*time.Millisecond),
+		humanClick(tx, ty),
+		humanSleep(1300*time.Millisecond, 1800*time.Millisecond),
 	); err != nil {
 		return fmt.Errorf("click dropdown trigger: %w", err)
 	}
@@ -413,8 +425,9 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	}
 	d.logf("playlist: row at (%.0f,%.0f) %s", cx, cy, rowInfo)
 	if err := chromedp.Run(ctx,
-		chromedp.MouseClickXY(cx, cy),
-		chromedp.Sleep(800*time.Millisecond),
+		humanSleep(200*time.Millisecond, 500*time.Millisecond),
+		humanClick(cx, cy),
+		humanSleep(700*time.Millisecond, 1100*time.Millisecond),
 	); err != nil {
 		return fmt.Errorf("click playlist row: %w", err)
 	}
@@ -436,7 +449,8 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	}
 	d.logf("playlist: Done at (%.0f,%.0f) %s", dx, dy, doneInfo)
 	if err := chromedp.Run(ctx,
-		chromedp.MouseClickXY(dx, dy),
+		humanSleep(200*time.Millisecond, 500*time.Millisecond),
+		humanClick(dx, dy),
 	); err != nil {
 		return fmt.Errorf("click done: %w", err)
 	}
@@ -470,7 +484,8 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	d.logf("playlist: Save at (%.0f,%.0f) %s", saveX, saveY, saveInfo)
 	d.logf("playlist: pre-save trigger-text=%q save-enabled=%s", probeTriggerText(ctx), probeSaveEnabled(ctx))
 	if err := chromedp.Run(ctx,
-		chromedp.MouseClickXY(saveX, saveY),
+		humanSleep(300*time.Millisecond, 700*time.Millisecond),
+		humanClick(saveX, saveY),
 		chromedp.Sleep(4*time.Second),
 	); err != nil {
 		return fmt.Errorf("click save: %w", err)
@@ -643,6 +658,96 @@ func probeSaveEnabled(ctx context.Context) string {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// applyStealth registers a Page init script that runs before any page script
+// on every navigation. It patches the most-fingerprinted automation tells:
+// navigator.webdriver (true under CDP), the missing window.chrome object,
+// the empty navigator.plugins array, and a singleton languages list. Paired
+// with --disable-blink-features=AutomationControlled, this covers the trio
+// of checks every "is this a headless browser?" snippet runs first.
+func applyStealth() chromedp.Action {
+	const script = `
+		try {
+			Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+		} catch (e) {}
+		if (!window.chrome) { window.chrome = { runtime: {} }; }
+		try {
+			Object.defineProperty(navigator, 'plugins', {
+				get: () => [
+					{ name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+					{ name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+					{ name: 'Native Client', filename: 'internal-nacl-plugin' },
+				],
+			});
+		} catch (e) {}
+		try {
+			Object.defineProperty(navigator, 'languages', {
+				get: () => ['en-US', 'en'],
+			});
+		} catch (e) {}
+	`
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(script).Do(ctx)
+		return err
+	})
+}
+
+// humanSleep blocks for a uniformly-random duration in [min, max). Used at
+// action boundaries to break up the dead-on-fixed-interval pattern that a
+// timing fingerprinter would otherwise see.
+func humanSleep(min, max time.Duration) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		d := min
+		if max > min {
+			d += time.Duration(rand.Int64N(int64(max - min)))
+		}
+		select {
+		case <-time.After(d):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+}
+
+// humanClick is a drop-in replacement for chromedp.MouseClickXY that first
+// dispatches a short series of mouseMoved events from a small random offset,
+// then issues a separate pressed/released pair with a human-ish dwell
+// between them. chromedp.MouseClickXY sends pressed+released back-to-back at
+// the exact target with no prior cursor motion — a near-zero-cost tell for
+// any behaviour analysis. The motion + dwell here costs ~200–500 ms per
+// click but removes one of the most obvious automation signals.
+func humanClick(x, y float64) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		startX := x + rand.Float64()*120 - 60
+		startY := y + rand.Float64()*120 - 60
+		steps := 3 + rand.IntN(3)
+		for i := 1; i <= steps; i++ {
+			t := float64(i) / float64(steps)
+			mx := startX + (x-startX)*t
+			my := startY + (y-startY)*t
+			if err := input.DispatchMouseEvent(input.MouseMoved, mx, my).Do(ctx); err != nil {
+				return err
+			}
+			select {
+			case <-time.After(time.Duration(15+rand.IntN(35)) * time.Millisecond):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if err := input.DispatchMouseEvent(input.MousePressed, x, y).
+			WithButton(input.Left).WithClickCount(1).Do(ctx); err != nil {
+			return err
+		}
+		select {
+		case <-time.After(time.Duration(50+rand.IntN(80)) * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return input.DispatchMouseEvent(input.MouseReleased, x, y).
+			WithButton(input.Left).WithClickCount(1).Do(ctx)
+	})
+}
+
 // clickByText finds the first element matching tagSelector whose textContent
 // matches re, and clicks it. Implemented via Evaluate because chromedp's
 // built-in selectors don't support text regex.
@@ -720,7 +825,10 @@ func attachThumbnailViaChooser(ctx context.Context, filePath string, logf func(s
 	}
 	logf("thumbnail: tile at (%.0f,%.0f) %s", tx, ty, info)
 
-	if err := chromedp.Run(ctx, chromedp.MouseClickXY(tx, ty)); err != nil {
+	if err := chromedp.Run(ctx,
+		humanSleep(200*time.Millisecond, 500*time.Millisecond),
+		humanClick(tx, ty),
+	); err != nil {
 		return fmt.Errorf("click thumbnail tile: %w", err)
 	}
 
@@ -809,7 +917,8 @@ func attachFileViaChooser(ctx context.Context, filePath string, logf func(string
 		return errors.New("could not find SELECT FILES button")
 	}
 	if err := chromedp.Run(ctx,
-		chromedp.MouseClickXY(sx, sy),
+		humanSleep(250*time.Millisecond, 600*time.Millisecond),
+		humanClick(sx, sy),
 	); err != nil {
 		return fmt.Errorf("native click select-files: %w", err)
 	}
