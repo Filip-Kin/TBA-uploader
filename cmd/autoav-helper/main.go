@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -43,10 +44,12 @@ func main() {
 
 	// Driver shared by all event managers. ProfileRoot is the global
 	// {data_root}/profiles directory.
-	driver = ytstudio.NewChromedpDriver(
+	d := ytstudio.NewChromedpDriver(
 		filepath.Join(dataRoot(), "profiles"),
 		*browserExe,
 	)
+	d.Verbose = true
+	driver = d
 
 	lock := sync.Mutex{}
 	mux := http.NewServeMux()
@@ -512,9 +515,10 @@ func apiUploadProfileLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Login blocks for as long as the browser stays open. Run it in a
 	// goroutine so the HTTP request returns immediately; the operator
-	// closes the window to finish.
+	// closes the window to finish. Use context.Background() because
+	// r.Context() is canceled the moment we write the response.
 	go func(name string) {
-		if err := driver.Login(r.Context(), name); err != nil {
+		if err := driver.Login(context.Background(), name); err != nil {
 			log.Printf("login (%s): %v", name, err)
 		}
 	}(body.ProfileName)

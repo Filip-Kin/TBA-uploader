@@ -204,7 +204,7 @@ func (m *uploadManager) uploadOne() {
 		Title:         target.title,
 		Description:   target.description,
 		ThumbnailPath: cfg.ThumbnailPath,
-		PlaylistID:    cfg.PlaylistID,
+		PlaylistName:  cfg.PlaylistName,
 		Visibility:    "PUBLIC",
 	})
 

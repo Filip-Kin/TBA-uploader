@@ -30,7 +30,7 @@ type eventConfig struct {
 	EventName           string `json:"event_name"`
 	VideoDir            string `json:"video_dir"`
 	ProfileName         string `json:"profile_name"`
-	PlaylistID          string `json:"playlist_id"`
+	PlaylistName        string `json:"playlist_name"`
 	ChannelCheck        string `json:"channel_check"`
 	TitleTemplate       string `json:"title_template"`
 	DescriptionTemplate string `json:"description_template"`

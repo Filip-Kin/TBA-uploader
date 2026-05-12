@@ -2,6 +2,7 @@ package ytstudio
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
@@ -112,6 +115,10 @@ func (d *ChromedpDriver) allocate(ctx context.Context, profileName string, headl
 		chromedp.Flag("restore-last-session", "false"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.WindowSize(1400, 900),
+		// Without an explicit UA, headless Chrome advertises "HeadlessChrome/…"
+		// and YouTube Studio serves an "unsupported browser" upsell instead
+		// of the real UI. Override to a vanilla Windows Chrome UA.
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
 	}
 	if headless {
 		opts = append(opts, chromedp.Headless)
@@ -229,6 +236,7 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 	)
 
 	// Step 1: navigate to YT Studio and check we're signed in.
+	d.logf("step 1: navigate to studio")
 	if err := chromedp.Run(bctx,
 		chromedp.Navigate("https://studio.youtube.com"),
 		chromedp.Sleep(3*time.Second),
@@ -236,6 +244,7 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 	); err != nil {
 		return UploadResult{}, fmt.Errorf("open studio: %w", err)
 	}
+	d.logf("step 1: at %s", currentURL)
 	if detectSignIn(currentURL) {
 		return UploadResult{}, ErrSessionExpired
 	}
@@ -243,23 +252,17 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 	// Read channel name; non-fatal if missing.
 	_ = chromedp.Run(bctx, chromedp.Evaluate(jsReadChannelName, &channelName))
 	channelName = strings.TrimSpace(channelName)
-	d.logf("channel: %q", channelName)
+	d.logf("step 1: channel=%q", channelName)
 
-	// Step 2: open the Create -> Upload video flow and attach the file.
-	// YT Studio's upload uses a hidden file input. We click "Create" first
-	// to open the menu, then look up the file input the dialog mounts.
-	if err := chromedp.Run(bctx,
-		clickByText("button", regexp.MustCompile(`(?i)create`)),
-		chromedp.Sleep(500*time.Millisecond),
-		// "Upload video" item — the menu has multiple entries.
-		clickByText("*", regexp.MustCompile(`(?i)upload\s*video`)),
-		chromedp.Sleep(1*time.Second),
-		// Wait for the file input. YT Studio mounts <input type=file accept=video/*>
-		// inside the upload dialog.
-		waitForVisibleInput("input[type=file]"),
-		chromedp.SetUploadFiles("input[type=file]", []string{abs}, chromedp.ByQuery),
-	); err != nil {
-		return UploadResult{}, fmt.Errorf("start upload: %w", err)
+	// Step 2: open the Create dropdown, click "Upload videos", and feed the
+	// file in via the CDP Page.fileChooserOpened interception API. The
+	// dropdown's menu items live inside ytcp-text-menu's shadow root, so we
+	// click them with a shadow-piercing JS walker. The file input itself is
+	// also inside shadow DOM — interception bypasses both problems by
+	// setting files via the backend node ID delivered with the chooser event.
+	d.logf("step 2: arming file-chooser interceptor")
+	if err := attachFileViaChooser(bctx, abs, d.logf); err != nil {
+		return UploadResult{}, fmt.Errorf("attach file: %w", err)
 	}
 	d.logf("file attached: %s", abs)
 
@@ -277,12 +280,11 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 	// <input type=file accept=image/*>; finding it by accept attribute keeps
 	// us off the main video input.
 	if thumbAbs != "" {
-		err := chromedp.Run(bctx,
-			chromedp.SetUploadFiles(`ytcp-thumbnail-uploader input[type=file]`, []string{thumbAbs}, chromedp.ByQuery),
-			chromedp.Sleep(1*time.Second),
-		)
-		if err != nil {
+		d.logf("step 4: attaching thumbnail")
+		if err := attachThumbnailViaChooser(bctx, thumbAbs, d.logf); err != nil {
 			d.logf("thumbnail upload failed: %v (continuing)", err)
+		} else {
+			d.logf("step 4: thumbnail attached")
 		}
 	}
 
@@ -340,34 +342,303 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 	}
 
 	// Step 9: add to playlist (optional). Reopens the edit dialog.
-	if in.PlaylistID != "" {
-		if err := d.addToPlaylist(bctx, videoID, in.PlaylistID); err != nil {
+	if in.PlaylistName != "" {
+		if err := d.addToPlaylist(bctx, videoID, in.PlaylistName); err != nil {
 			d.logf("add-to-playlist failed: %v", err)
 			// Non-fatal — operator can fix manually.
+		} else {
+			d.logf("added to playlist %q", in.PlaylistName)
 		}
 	}
 
 	return UploadResult{VideoID: videoID, ChannelName: channelName}, nil
 }
 
-// addToPlaylist opens https://studio.youtube.com/video/<id>/edit and toggles
-// the playlist checkbox identified by playlistID.
-func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistID string) error {
+// addToPlaylist opens https://studio.youtube.com/video/<id>/edit, opens the
+// playlist dropdown, ticks the checkbox whose label exactly matches
+// playlistName, then commits.
+//
+// YouTube Studio's DOM doesn't store playlist IDs anywhere reachable from
+// JS (neither as DOM attributes nor as Polymer/Lit properties on the
+// checkbox rows). Matching by visible name is the only path that works.
+// All clicks use shadow-pierce locate + native MouseClickXY because
+// ytcp-button / ytcp-dropdown-trigger / ytcp-checkbox-lit all ignore
+// synthetic el.click() (Polymer gesture system listens for the full
+// pointerdown/up sequence).
+func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistName string) error {
 	editURL := fmt.Sprintf("https://studio.youtube.com/video/%s/edit", videoID)
-	return chromedp.Run(ctx,
+	if err := chromedp.Run(ctx,
 		chromedp.Navigate(editURL),
 		chromedp.WaitVisible("#title-textarea", chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
-		jsClick("ytcp-dropdown-trigger[use-placeholder]"),
-		chromedp.Sleep(1*time.Second),
-		jsClick(fmt.Sprintf(`[data-value='%s'], [id*='%s']`, playlistID, playlistID)),
-		chromedp.Sleep(500*time.Millisecond),
-		jsClick(`ytcp-button[test-id='done-button']`),
-		chromedp.Sleep(1*time.Second),
-		// Save the edit dialog to commit the playlist change.
-		jsClick(`button[aria-label='Save']:not([disabled])`),
-		chromedp.Sleep(2*time.Second),
-	)
+	); err != nil {
+		return fmt.Errorf("open edit page: %w", err)
+	}
+
+	// Step a: locate and coord-click the playlist dropdown trigger.
+	d.logf("playlist: locate dropdown trigger")
+	var tx, ty float64
+	var trigInfo string
+	if err := chromedp.Run(ctx, shadowLocateBySelector(
+		[]string{"ytcp-dropdown-trigger[use-placeholder]", "ytcp-dropdown-trigger"},
+		&tx, &ty, &trigInfo,
+	)); err != nil {
+		return fmt.Errorf("locate dropdown trigger: %w", err)
+	}
+	if trigInfo == "" {
+		return errors.New("playlist dropdown trigger not found")
+	}
+	d.logf("playlist: trigger at (%.0f,%.0f) %s", tx, ty, trigInfo)
+	if err := chromedp.Run(ctx,
+		chromedp.MouseClickXY(tx, ty),
+		chromedp.Sleep(1500*time.Millisecond),
+	); err != nil {
+		return fmt.Errorf("click dropdown trigger: %w", err)
+	}
+	d.logf("playlist: visible-checkbox count=%s", probeDropdownState(ctx))
+
+	// Step b: find the checkbox row whose label exactly matches playlistName
+	// and coord-click it. We click the LABEL element wrapping the checkbox,
+	// not the checkbox-lit itself — clicking the label is what the user does
+	// and native HTML label-for-checkbox semantics make it the most reliable
+	// way to toggle a Polymer ytcp-checkbox-lit.
+	d.logf("playlist: locate row %q", playlistName)
+	var cx, cy float64
+	var rowInfo string
+	if err := chromedp.Run(ctx, shadowLocatePlaylistRow(playlistName, &cx, &cy, &rowInfo)); err != nil {
+		return fmt.Errorf("locate playlist row: %w", err)
+	}
+	if rowInfo == "" {
+		return fmt.Errorf("playlist %q not found in dropdown", playlistName)
+	}
+	d.logf("playlist: row at (%.0f,%.0f) %s", cx, cy, rowInfo)
+	if err := chromedp.Run(ctx,
+		chromedp.MouseClickXY(cx, cy),
+		chromedp.Sleep(800*time.Millisecond),
+	); err != nil {
+		return fmt.Errorf("click playlist row: %w", err)
+	}
+	d.logf("playlist: post-row state=%s", probeRowChecked(ctx, playlistName))
+
+	// Step c: click Done to close the dropdown.
+	d.logf("playlist: locate Done")
+	var dx, dy float64
+	var doneInfo string
+	if err := chromedp.Run(ctx, shadowLocateByText(
+		[]string{"ytcp-button[test-id='done-button']", "ytcp-button", "button"},
+		regexp.MustCompile(`(?i)^done$`),
+		&dx, &dy, &doneInfo,
+	)); err != nil {
+		return fmt.Errorf("locate done: %w", err)
+	}
+	if doneInfo == "" {
+		return errors.New("Done button not found")
+	}
+	d.logf("playlist: Done at (%.0f,%.0f) %s", dx, dy, doneInfo)
+	if err := chromedp.Run(ctx,
+		chromedp.MouseClickXY(dx, dy),
+	); err != nil {
+		return fmt.Errorf("click done: %w", err)
+	}
+	// The playlist dialog is a tp-yt-paper-dialog with an animated close.
+	// If we click Save while it's still fading out, the click hits the
+	// backdrop instead. Poll until the dialog is gone.
+	if err := waitDialogHidden(ctx, 5*time.Second); err != nil {
+		d.logf("playlist: dialog-hidden wait: %v", err)
+	} else {
+		d.logf("playlist: dialog closed")
+	}
+
+	// Step d: click Save on the edit dialog to commit the change.
+	d.logf("playlist: locate Save")
+	var saveX, saveY float64
+	var saveInfo string
+	if err := chromedp.Run(ctx, shadowLocateBySelector(
+		[]string{
+			"ytcp-button#save",
+			"ytcp-button[id='save']",
+			"ytcp-button[test-id='SAVE']",
+			"button[aria-label='Save']:not([aria-disabled='true'])",
+		},
+		&saveX, &saveY, &saveInfo,
+	)); err != nil {
+		return fmt.Errorf("locate save: %w", err)
+	}
+	if saveInfo == "" {
+		return errors.New("Save button not found")
+	}
+	d.logf("playlist: Save at (%.0f,%.0f) %s", saveX, saveY, saveInfo)
+	d.logf("playlist: pre-save trigger-text=%q save-enabled=%s", probeTriggerText(ctx), probeSaveEnabled(ctx))
+	if err := chromedp.Run(ctx,
+		chromedp.MouseClickXY(saveX, saveY),
+		chromedp.Sleep(4*time.Second),
+	); err != nil {
+		return fmt.Errorf("click save: %w", err)
+	}
+	d.logf("playlist: post-save trigger-text=%q save-enabled=%s", probeTriggerText(ctx), probeSaveEnabled(ctx))
+	return nil
+}
+
+// probeTriggerText returns the visible text of the playlist dropdown trigger.
+// After Done commits a playlist toggle, the trigger should show the playlist
+// name (e.g. "Test") rather than the placeholder "Select".
+func probeTriggerText(ctx context.Context) string {
+	const js = `(() => {
+		function walk(root, fn) {
+			fn(root);
+			const all = root.querySelectorAll('*');
+			for (const el of all) {
+				if (el.shadowRoot) walk(el.shadowRoot, fn);
+			}
+		}
+		let t = null;
+		walk(document, root => {
+			if (t) return;
+			const cands = [
+				...root.querySelectorAll('ytcp-dropdown-trigger[use-placeholder]'),
+				...root.querySelectorAll('ytcp-dropdown-trigger'),
+			];
+			const it = cands.find(e => e.offsetParent !== null);
+			if (it) t = it;
+		});
+		if (!t) return '';
+		return (t.innerText || t.textContent || '').trim().slice(0, 80);
+	})()`
+	var out string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(js, &out))
+	return out
+}
+
+// waitDialogHidden polls until any ytcp-playlist-dialog is no longer visible
+// (or its inner tp-yt-paper-dialog is closed). Returns nil on success, or an
+// error on timeout.
+func waitDialogHidden(ctx context.Context, timeout time.Duration) error {
+	const js = `(() => {
+		function walk(root, fn) {
+			fn(root);
+			const all = root.querySelectorAll('*');
+			for (const el of all) {
+				if (el.shadowRoot) walk(el.shadowRoot, fn);
+			}
+		}
+		let visible = false;
+		walk(document, root => {
+			if (visible) return;
+			root.querySelectorAll('ytcp-playlist-dialog tp-yt-paper-dialog, ytcp-playlist-dialog').forEach(el => {
+				if (el.offsetParent !== null) visible = true;
+			});
+		});
+		return visible;
+	})()`
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var visible bool
+		if err := chromedp.Run(ctx, chromedp.Evaluate(js, &visible)); err != nil {
+			return err
+		}
+		if !visible {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+	return errors.New("playlist dialog still visible")
+}
+
+// probeDropdownState returns how many ytcp-checkbox-lit elements are visible
+// anywhere on the page (piercing shadow). Used to confirm the playlist
+// dropdown actually opened after the trigger click.
+func probeDropdownState(ctx context.Context) string {
+	const js = `(() => {
+		function walk(root, fn) {
+			fn(root);
+			const all = root.querySelectorAll('*');
+			for (const el of all) {
+				if (el.shadowRoot) walk(el.shadowRoot, fn);
+			}
+		}
+		let n = 0, checked = 0;
+		walk(document, root => {
+			root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
+				if (el.offsetParent === null) return;
+				n++;
+				if (el.getAttribute('aria-checked') === 'true' || el.hasAttribute('checked')) checked++;
+			});
+		});
+		return n + ' visible, ' + checked + ' checked';
+	})()`
+	var out string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(js, &out))
+	return out
+}
+
+// probeRowChecked returns whether the checkbox row labeled with `name` is
+// checked. Helps diagnose whether the row click actually toggled the
+// underlying ytcp-checkbox-lit.
+func probeRowChecked(ctx context.Context, name string) string {
+	js := fmt.Sprintf(`(() => {
+		const want = %q.toLowerCase();
+		function walk(root, fn) {
+			fn(root);
+			const all = root.querySelectorAll('*');
+			for (const el of all) {
+				if (el.shadowRoot) walk(el.shadowRoot, fn);
+			}
+		}
+		let found = null;
+		walk(document, root => {
+			root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
+				if (found || el.offsetParent === null) return;
+				let p = el, text = '';
+				for (let i = 0; i < 4 && p; i++) {
+					const t = (p.innerText || p.textContent || '').trim();
+					if (t) { text = t; break; }
+					p = p.parentElement;
+				}
+				if (text.toLowerCase() === want) found = el;
+			});
+		});
+		if (!found) return 'not-found';
+		const ariaChecked = found.getAttribute('aria-checked');
+		const hasChecked = found.hasAttribute('checked');
+		const innerChecked = found.shadowRoot ? !!found.shadowRoot.querySelector('[checked]') : null;
+		return 'aria=' + ariaChecked + ' attr=' + hasChecked + ' inner=' + innerChecked;
+	})()`, name)
+	var out string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(js, &out))
+	return out
+}
+
+// probeSaveEnabled inspects the Save button's enabled/disabled state.
+func probeSaveEnabled(ctx context.Context) string {
+	const js = `(() => {
+		function walk(root, fn) {
+			fn(root);
+			const all = root.querySelectorAll('*');
+			for (const el of all) {
+				if (el.shadowRoot) walk(el.shadowRoot, fn);
+			}
+		}
+		let btn = null;
+		walk(document, root => {
+			if (btn) return;
+			const cands = [
+				...root.querySelectorAll('ytcp-button#save'),
+				...root.querySelectorAll('ytcp-button[id=save]'),
+			];
+			const it = cands.find(e => e.offsetParent !== null);
+			if (it) btn = it;
+		});
+		if (!btn) return 'no-save-button';
+		return 'aria-disabled=' + btn.getAttribute('aria-disabled') +
+			' disabled-attr=' + btn.hasAttribute('disabled');
+	})()`
+	var out string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(js, &out))
+	return out
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -375,18 +646,432 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistID 
 // clickByText finds the first element matching tagSelector whose textContent
 // matches re, and clicks it. Implemented via Evaluate because chromedp's
 // built-in selectors don't support text regex.
+//
+// The Go regex is converted to a JS RegExp; we strip the `(?i)` inline-flag
+// prefix (JS doesn't support it) and always pass the 'i' flag to RegExp.
 func clickByText(tagSelector string, re *regexp.Regexp) chromedp.Action {
+	var unused string
+	return clickByTextResult(tagSelector, re, &unused)
+}
+
+// clickByTextResult is the same as clickByText, but writes a short description
+// of the matched element (or "" if none) into *info so the caller can log it.
+func clickByTextResult(tagSelector string, re *regexp.Regexp, info *string) chromedp.Action {
+	pat := strings.TrimPrefix(re.String(), "(?i)")
 	js := fmt.Sprintf(`
 		(() => {
 			const re = new RegExp(%q, 'i');
 			const els = [...document.querySelectorAll(%q)];
-			const el = els.find(e => re.test((e.textContent || '').trim()) && e.offsetParent !== null);
-			if (el) { el.click(); return true; }
-			return false;
+			// Prefer an exact text match before falling back to a partial match.
+			const visible = els.filter(e => e.offsetParent !== null && re.test((e.textContent || '').trim()));
+			const exact = visible.find(e => re.test((e.textContent || '').trim().split('\n')[0]));
+			const el = exact || visible[0];
+			if (!el) return '';
+			const id = el.id ? '#' + el.id : '';
+			const cls = el.className ? '.' + ('' + el.className).split(' ').filter(Boolean).slice(0, 3).join('.') : '';
+			const txt = ((el.textContent || '').trim().slice(0, 40)).replace(/\s+/g, ' ');
+			el.click();
+			return el.tagName.toLowerCase() + id + cls + ' :: ' + JSON.stringify(txt);
 		})()
-	`, re.String(), tagSelector)
-	var ok bool
-	return chromedp.Evaluate(js, &ok)
+	`, pat, tagSelector)
+	return chromedp.Evaluate(js, info)
+}
+
+// attachFileViaChooser drives the Create → "Upload videos" menu flow and
+// feeds the file in via CDP file-chooser interception. The menu item lives
+// in ytcp-text-menu's shadow root, so we click it with a shadow-piercing
+// walker; the file input also lives in shadow DOM but interception bypasses
+// that by setting files via the backend node ID delivered with the chooser
+// event.
+// attachThumbnailViaChooser locates the ytcp-thumbnail-uploader element (the
+// big "Upload thumbnail" tile in the upload dialog's Details tab), clicks it
+// with a real coordinate click, and feeds the image path through file-chooser
+// interception. Same pattern as the main video upload: shadow-piercing locate
+// + native click + CDP chooser intercept.
+func attachThumbnailViaChooser(ctx context.Context, filePath string, logf func(string, ...any)) error {
+	chooserCh := make(chan cdp.BackendNodeID, 1)
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		if e, ok := ev.(*page.EventFileChooserOpened); ok {
+			select {
+			case chooserCh <- e.BackendNodeID:
+			default:
+			}
+		}
+	})
+
+	if err := chromedp.Run(ctx, page.SetInterceptFileChooserDialog(true)); err != nil {
+		return fmt.Errorf("enable chooser intercept: %w", err)
+	}
+	defer func() {
+		_ = chromedp.Run(ctx, page.SetInterceptFileChooserDialog(false))
+	}()
+
+	logf("thumbnail: locate uploader tile")
+	var tx, ty float64
+	var info string
+	if err := chromedp.Run(ctx, shadowLocateBySelector(
+		[]string{"ytcp-thumbnail-uploader", "ytcp-thumbnail-uploader button", "button[aria-label*='thumbnail' i]"},
+		&tx, &ty, &info,
+	)); err != nil {
+		return fmt.Errorf("locate thumbnail uploader: %w", err)
+	}
+	if info == "" {
+		return errors.New("thumbnail uploader element not found")
+	}
+	logf("thumbnail: tile at (%.0f,%.0f) %s", tx, ty, info)
+
+	if err := chromedp.Run(ctx, chromedp.MouseClickXY(tx, ty)); err != nil {
+		return fmt.Errorf("click thumbnail tile: %w", err)
+	}
+
+	select {
+	case bnid := <-chooserCh:
+		logf("thumbnail: chooser opened on backend node %d", bnid)
+		return chromedp.Run(ctx, dom.SetFileInputFiles([]string{filePath}).WithBackendNodeID(bnid))
+	case <-time.After(15 * time.Second):
+		return errors.New("thumbnail file chooser never opened")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func attachFileViaChooser(ctx context.Context, filePath string, logf func(string, ...any)) error {
+	// Listener captures the backend node ID of the file chooser when it opens.
+	// Buffered so a slow consumer doesn't deadlock the CDP event dispatcher.
+	chooserCh := make(chan cdp.BackendNodeID, 1)
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		if e, ok := ev.(*page.EventFileChooserOpened); ok {
+			select {
+			case chooserCh <- e.BackendNodeID:
+			default:
+			}
+		}
+	})
+
+	if err := chromedp.Run(ctx, page.SetInterceptFileChooserDialog(true)); err != nil {
+		return fmt.Errorf("enable chooser intercept: %w", err)
+	}
+	defer func() {
+		_ = chromedp.Run(ctx, page.SetInterceptFileChooserDialog(false))
+	}()
+
+	logf("step 2: click Create")
+	var createInfo string
+	if err := chromedp.Run(ctx,
+		// The top-bar Create button. The class is stable on current Studio.
+		// Fall back to text-based match if the class moves.
+		jsClickFirstResult([]string{
+			`ytcp-button.ytcpAppHeaderCreateIcon`,
+			`#create-icon-button`,
+		}, &createInfo),
+		chromedp.Sleep(700*time.Millisecond),
+	); err != nil {
+		return fmt.Errorf("click create: %w", err)
+	}
+	logf("step 2: Create matched %s", createInfo)
+
+	logf("step 2: shadow-pierce click Upload videos")
+	var uploadInfo string
+	if err := chromedp.Run(ctx,
+		shadowClickByText(
+			[]string{"tp-yt-paper-item", "ytcp-text-menu-item", "[role=menuitem]"},
+			regexp.MustCompile(`(?i)^upload\s*videos?$`),
+			&uploadInfo,
+		),
+	); err != nil {
+		return fmt.Errorf("click upload-videos menu item: %w", err)
+	}
+	logf("step 2: Upload-videos matched %s", uploadInfo)
+
+	// The upload modal opens but doesn't auto-trigger the native file chooser.
+	// We have to click the "Select files" button inside it. The button is a
+	// ytcp-button (Polymer custom element) whose click handler listens for
+	// the full pointerdown/pointerup gesture sequence — a synthetic .click()
+	// in JS is ignored. So we shadow-walk to find the button's screen
+	// coordinates, then issue a real CDP mouse click there.
+	logf("step 2: locate SELECT FILES button")
+	var sx, sy float64
+	var selectInfo string
+	if err := chromedp.Run(ctx,
+		chromedp.Sleep(1*time.Second),
+		shadowLocateByText(
+			[]string{"ytcp-button#select-files-button", "ytcp-button", "button", "[role=button]"},
+			// pit-podcast: r"select file|choose file" — match either phrasing,
+			// substring (not anchored), because the rendered text may wrap.
+			regexp.MustCompile(`(?i)select\s*files?|choose\s*files?`),
+			&sx, &sy, &selectInfo,
+		),
+	); err != nil {
+		return fmt.Errorf("locate select-files: %w", err)
+	}
+	logf("step 2: SELECT FILES at (%.0f,%.0f) %s", sx, sy, selectInfo)
+	if selectInfo == "" {
+		return errors.New("could not find SELECT FILES button")
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.MouseClickXY(sx, sy),
+	); err != nil {
+		return fmt.Errorf("native click select-files: %w", err)
+	}
+
+	select {
+	case bnid := <-chooserCh:
+		logf("step 2: chooser opened on backend node %d", bnid)
+		return chromedp.Run(ctx, dom.SetFileInputFiles([]string{filePath}).WithBackendNodeID(bnid))
+	case <-time.After(30 * time.Second):
+		return errors.New("file chooser never opened after clicking SELECT FILES")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// jsClickFirstResult tries each selector in order and clicks the first
+// visible match. Writes a short description of the match into *info.
+func jsClickFirstResult(selectors []string, info *string) chromedp.Action {
+	// Build a JS array literal of selectors.
+	parts := make([]string, len(selectors))
+	for i, s := range selectors {
+		parts[i] = fmt.Sprintf("%q", s)
+	}
+	arr := "[" + strings.Join(parts, ",") + "]"
+	js := fmt.Sprintf(`
+		(() => {
+			const sels = %s;
+			for (const sel of sels) {
+				const els = [...document.querySelectorAll(sel)];
+				const el = els.find(e => e.offsetParent !== null);
+				if (el) {
+					el.click();
+					const id = el.id ? '#' + el.id : '';
+					return sel + ' :: ' + el.tagName.toLowerCase() + id;
+				}
+			}
+			return '';
+		})()
+	`, arr)
+	return chromedp.Evaluate(js, info)
+}
+
+// shadowLocateBySelector walks all shadow roots and returns the center point
+// of the first visible element matching any of the given CSS selectors.
+func shadowLocateBySelector(selectors []string, x, y *float64, info *string) chromedp.Action {
+	parts := make([]string, len(selectors))
+	for i, s := range selectors {
+		parts[i] = fmt.Sprintf("%q", s)
+	}
+	selArr := "[" + strings.Join(parts, ",") + "]"
+	js := fmt.Sprintf(`
+		(() => {
+			const sels = %s;
+			let target = null;
+			function walk(root) {
+				if (target) return;
+				for (const sel of sels) {
+					try {
+						const els = [...root.querySelectorAll(sel)];
+						const it = els.find(e => e.offsetParent !== null);
+						if (it) { target = it; return; }
+					} catch (e) {}
+				}
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot);
+					if (target) return;
+				}
+			}
+			walk(document);
+			if (!target) return JSON.stringify({info: ''});
+			const r = target.getBoundingClientRect();
+			const id = target.id ? '#' + target.id : '';
+			return JSON.stringify({
+				x: r.left + r.width / 2,
+				y: r.top + r.height / 2,
+				info: target.tagName.toLowerCase() + id,
+			});
+		})()
+	`, selArr)
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var raw string
+		if err := chromedp.Evaluate(js, &raw).Do(ctx); err != nil {
+			return err
+		}
+		var out struct {
+			X, Y float64
+			Info string
+		}
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return fmt.Errorf("parse locate result %q: %w", raw, err)
+		}
+		*x, *y, *info = out.X, out.Y, out.Info
+		return nil
+	})
+}
+
+// shadowLocatePlaylistRow walks the document looking for the playlist
+// checkbox row whose label exactly matches name. Returns the row's center
+// coordinates so the caller can issue a real MouseClickXY (the checkboxes
+// ignore synthetic .click()).
+//
+// The row label is rendered outside the ytcp-checkbox-lit element itself —
+// it lives in the parent <label>'s innerText (which pierces shadow). The
+// click target needs to be the checkbox-lit itself; clicking the label is
+// less reliable than clicking the checkbox area directly.
+func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.Action {
+	js := fmt.Sprintf(`
+		(() => {
+			const wantName = %q.toLowerCase();
+			function walk(root, fn) {
+				fn(root);
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot, fn);
+				}
+			}
+			let target = null;
+			walk(document, root => {
+				if (target) return;
+				root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
+					if (target || el.offsetParent === null) return;
+					// Climb to nearest container (<label> for legacy, <tr>/<div> elsewhere)
+					// and read its full text — that's where the playlist title lives.
+					let p = el;
+					let text = '';
+					for (let i = 0; i < 4 && p; i++) {
+						const t = (p.innerText || p.textContent || '').trim();
+						if (t) { text = t; break; }
+						p = p.parentElement;
+					}
+					if (text.toLowerCase() === wantName) {
+						target = el;
+					}
+				});
+			});
+			if (!target) return JSON.stringify({info: ''});
+			const r = target.getBoundingClientRect();
+			return JSON.stringify({
+				x: r.left + r.width / 2,
+				y: r.top + r.height / 2,
+				info: target.tagName.toLowerCase() + (target.id ? '#' + target.id : ''),
+			});
+		})()
+	`, name)
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var raw string
+		if err := chromedp.Evaluate(js, &raw).Do(ctx); err != nil {
+			return err
+		}
+		var out struct {
+			X, Y float64
+			Info string
+		}
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return fmt.Errorf("parse locate result %q: %w", raw, err)
+		}
+		*x, *y, *info = out.X, out.Y, out.Info
+		return nil
+	})
+}
+
+// shadowLocateByText walks all shadow roots to find an element matching any
+// tagSelector whose textContent matches re, and writes the center of its
+// bounding rect into *x, *y plus a short description into *info. If no
+// match, *info is left empty so the caller can decide what to do.
+func shadowLocateByText(tagSelectors []string, re *regexp.Regexp, x, y *float64, info *string) chromedp.Action {
+	pat := strings.TrimPrefix(re.String(), "(?i)")
+	parts := make([]string, len(tagSelectors))
+	for i, s := range tagSelectors {
+		parts[i] = fmt.Sprintf("%q", s)
+	}
+	selArr := "[" + strings.Join(parts, ",") + "]"
+	js := fmt.Sprintf(`
+		(() => {
+			const re = new RegExp(%q, 'i');
+			const sels = %s;
+			let target = null;
+			function walk(root) {
+				if (target) return;
+				for (const sel of sels) {
+					const els = [...root.querySelectorAll(sel)];
+					const it = els.find(e =>
+						e.offsetParent !== null &&
+						re.test((e.textContent || '').trim())
+					);
+					if (it) { target = it; return; }
+				}
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot);
+					if (target) return;
+				}
+			}
+			walk(document);
+			if (!target) return JSON.stringify({info: ''});
+			const r = target.getBoundingClientRect();
+			const id = target.id ? '#' + target.id : '';
+			const txt = ((target.textContent || '').trim().slice(0, 40)).replace(/\s+/g, ' ');
+			return JSON.stringify({
+				x: r.left + r.width / 2,
+				y: r.top + r.height / 2,
+				info: target.tagName.toLowerCase() + id + ' :: ' + JSON.stringify(txt),
+			});
+		})()
+	`, pat, selArr)
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var raw string
+		if err := chromedp.Evaluate(js, &raw).Do(ctx); err != nil {
+			return err
+		}
+		var out struct {
+			X, Y float64
+			Info string
+		}
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return fmt.Errorf("parse locate result %q: %w", raw, err)
+		}
+		*x, *y, *info = out.X, out.Y, out.Info
+		return nil
+	})
+}
+
+// shadowClickByText walks all shadow roots looking for an element matching
+// any tagSelector with textContent that matches re, and clicks it.
+func shadowClickByText(tagSelectors []string, re *regexp.Regexp, info *string) chromedp.Action {
+	pat := strings.TrimPrefix(re.String(), "(?i)")
+	parts := make([]string, len(tagSelectors))
+	for i, s := range tagSelectors {
+		parts[i] = fmt.Sprintf("%q", s)
+	}
+	selArr := "[" + strings.Join(parts, ",") + "]"
+	js := fmt.Sprintf(`
+		(() => {
+			const re = new RegExp(%q, 'i');
+			const sels = %s;
+			let target = null;
+			function walk(root) {
+				if (target) return;
+				for (const sel of sels) {
+					const els = [...root.querySelectorAll(sel)];
+					const it = els.find(e =>
+						e.offsetParent !== null &&
+						re.test((e.textContent || '').trim())
+					);
+					if (it) { target = it; return; }
+				}
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot);
+					if (target) return;
+				}
+			}
+			walk(document);
+			if (!target) return '';
+			const id = target.id ? '#' + target.id : '';
+			const txt = ((target.textContent || '').trim().slice(0, 40)).replace(/\s+/g, ' ');
+			target.click();
+			return target.tagName.toLowerCase() + id + ' :: ' + JSON.stringify(txt);
+		})()
+	`, pat, selArr)
+	return chromedp.Evaluate(js, info)
 }
 
 // waitForVisibleInput polls until selector matches a visible element. The
@@ -433,8 +1118,11 @@ func fillTextbox(selector, value string) chromedp.Action {
 	}
 }
 
-// waitForText polls document.body.innerText against a regex.
+// waitForText polls document.body.innerText against a regex. Accepts patterns
+// in Go syntax; the `(?i)` inline flag is stripped because JS RegExp doesn't
+// understand it (the 'i' flag is always set anyway).
 func waitForText(pattern string) chromedp.Action {
+	pattern = strings.TrimPrefix(pattern, "(?i)")
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		for {
 			var found bool
@@ -470,11 +1158,17 @@ func jsClick(selector string) chromedp.Action {
 
 // ─── JS snippets ──────────────────────────────────────────────────────────────
 
-// jsReadChannelName returns "" when the channel name element is missing.
+// jsReadChannelName returns the channel name visible in Studio's side nav, or
+// "" if not signed in. The channel name lives inside a shadow DOM that
+// querySelectorAll can't pierce, so we parse it out of document.body.innerText
+// (which does pierce shadow boundaries). Sign-in is detected via the
+// /channel/UC… URL prefix Studio uses after auth.
 const jsReadChannelName = `
 	(() => {
-		const el = document.querySelector('#channel-name, .ytcp-channel-name, ytcp-entity-name');
-		return el ? (el.innerText || el.textContent || '').trim() : '';
+		if (!location.pathname.match(/\/channel\/UC[\w-]+/)) return '';
+		const text = document.body.innerText || '';
+		const m = text.match(/Your channel\s*\n\s*([^\n]+)/);
+		return m ? m[1].trim() : '';
 	})()
 `
 

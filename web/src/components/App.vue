@@ -1026,9 +1026,10 @@
                         </div>
                         <div class="form-inline">
                             <label>
-                                Playlist ID:
+                                Playlist name:
                                 <b-form-input
-                                    v-model="ytUploadConfig.playlist_id"
+                                    v-model="ytUploadConfig.playlist_name"
+                                    placeholder="exact playlist name as shown in YT Studio"
                                     @change="ytSaveConfig"
                                 />
                             </label>
@@ -1893,7 +1894,7 @@ export default {
         // YouTube auto-upload state (per-event, loaded from the helper).
         ytUploadConfig: {
             profile_name: '',
-            playlist_id: '',
+            playlist_name: '',
             channel_check: '',
             video_dir: '',
             title_template: '',
@@ -3683,7 +3684,7 @@ export default {
                 const r = await $.getJSON(this.autoAVHelperApiUrl + '/api/upload/config?event_key=' + encodeURIComponent(this.selectedEvent));
                 this.ytUploadConfig = Object.assign({
                     profile_name: '',
-                    playlist_id: '',
+                    playlist_name: '',
                     channel_check: '',
                     video_dir: '',
                     title_template: '',

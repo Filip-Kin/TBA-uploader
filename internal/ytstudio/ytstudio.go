@@ -23,7 +23,7 @@ type UploadInput struct {
 	Title         string
 	Description   string
 	ThumbnailPath string // empty => skip thumbnail step
-	PlaylistID    string // empty => skip playlist add
+	PlaylistName  string // exact playlist name; empty => skip playlist add
 	Visibility    string // PUBLIC | UNLISTED | PRIVATE; empty defaults to PUBLIC
 }
 

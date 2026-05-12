@@ -95,39 +95,96 @@ func renderTitle(tmpl string, ctx *templateContext) string {
 	})
 }
 
-// renderDescription walks the template line by line. Any line containing a
-// placeholder that resolves to undefined is dropped. Lines with no
-// placeholders are kept verbatim.
+// renderDescription walks the template block by block (a "block" is a run of
+// non-blank lines, separated from other blocks by blank lines).
+//
+// Per-line rule: any line containing a placeholder that resolves to undefined
+// is dropped.
+//
+// Per-block rule: if a block contains at least one placeholder-bearing line
+// AND every placeholder-bearing line in that block was dropped, the whole
+// block (including its pure-text header lines) is dropped. This matches the
+// plan's intent — when there's no alliance data, the description falls back
+// to just `{title}` instead of leaving orphaned "Red Alliance:" / "Blue
+// Alliance:" headers above empty space.
+//
+// A block that is entirely pure-text (no placeholders anywhere) is always
+// kept verbatim, since the user clearly intended it as static content.
 func renderDescription(tmpl string, ctx *templateContext) string {
+	type rendered struct {
+		text   string
+		hasPh  bool
+		failed bool
+	}
+
 	lines := strings.Split(tmpl, "\n")
-	out := make([]string, 0, len(lines))
+	var blocks [][]rendered
+	var cur []rendered
+	flush := func() {
+		if cur != nil {
+			blocks = append(blocks, cur)
+			cur = nil
+		}
+	}
 	for _, line := range lines {
-		rendered, drop := renderLine(line, ctx)
-		if drop {
+		if strings.TrimSpace(line) == "" {
+			flush()
 			continue
 		}
-		out = append(out, rendered)
+		text, failed, hasPh := renderLineInfo(line, ctx)
+		cur = append(cur, rendered{text: text, hasPh: hasPh, failed: failed})
 	}
-	// Collapse runs of blank lines that result from drops, so the output
-	// doesn't have weird vertical gaps.
-	out = collapseBlankRuns(out)
+	flush()
+
+	var out []string
+	for _, b := range blocks {
+		hasData := false
+		allFailed := true
+		for _, l := range b {
+			if l.hasPh {
+				hasData = true
+				if !l.failed {
+					allFailed = false
+				}
+			}
+		}
+		if hasData && allFailed {
+			continue
+		}
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		for _, l := range b {
+			if l.failed {
+				continue
+			}
+			out = append(out, l.text)
+		}
+	}
 	return strings.Join(out, "\n")
 }
 
-func renderLine(line string, ctx *templateContext) (string, bool) {
-	drop := false
+// renderLineInfo renders one template line and reports whether it contained
+// any placeholders and whether any of them failed to resolve.
+func renderLineInfo(line string, ctx *templateContext) (text string, failed, hasPh bool) {
 	rendered := placeholderRe.ReplaceAllStringFunc(line, func(match string) string {
+		hasPh = true
 		name := match[1 : len(match)-1]
 		val, ok := ctx.resolvePlaceholder(name)
 		if !ok {
-			drop = true
+			failed = true
 		}
 		return val
 	})
-	// Trim trailing whitespace so empty values (e.g. blank team names) don't
-	// leave stray spaces on the line.
 	rendered = strings.TrimRight(rendered, " \t")
-	return rendered, drop
+	return rendered, failed, hasPh
+}
+
+// renderLine kept for compatibility with existing tests / callers; equivalent
+// to the per-line drop rule used before the block-aware behavior.
+func renderLine(line string, ctx *templateContext) (string, bool) {
+	text, failed, _ := renderLineInfo(line, ctx)
+	return text, failed
 }
 
 func collapseBlankRuns(lines []string) []string {
