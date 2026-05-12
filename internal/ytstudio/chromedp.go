@@ -409,6 +409,23 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	}
 	d.logf("playlist: visible-checkbox count=%s", probeDropdownState(ctx))
 
+	// Step a.5: type the playlist name into the dropdown's search input.
+	// The dialog is virtualized — on channels with many playlists, most rows
+	// render as DOM stubs with no text until scrolled into view, so a direct
+	// name match can't find them. Filtering collapses the list to the row
+	// we want before the matcher runs.
+	if searchInfo, err := playlistFilterByName(ctx, playlistName); err != nil {
+		d.logf("playlist: filter input failed: %v (proceeding without filter)", err)
+	} else if searchInfo == "" {
+		d.logf("playlist: no search input found, proceeding without filter")
+	} else {
+		d.logf("playlist: filtered via %s", searchInfo)
+		if err := chromedp.Run(ctx, humanSleep(1200*time.Millisecond, 1800*time.Millisecond)); err != nil {
+			return err
+		}
+		d.logf("playlist: post-filter count=%s", probeDropdownState(ctx))
+	}
+
 	// Step b: find the checkbox row whose label exactly matches playlistName
 	// and coord-click it. We click the LABEL element wrapping the checkbox,
 	// not the checkbox-lit itself — clicking the label is what the user does
@@ -1017,14 +1034,19 @@ func shadowLocateBySelector(selectors []string, x, y *float64, info *string) chr
 }
 
 // shadowLocatePlaylistRow walks the document looking for the playlist
-// checkbox row whose label exactly matches name. Returns the row's center
+// checkbox row whose label matches name. Returns the row's center
 // coordinates so the caller can issue a real MouseClickXY (the checkboxes
 // ignore synthetic .click()).
 //
-// The row label is rendered outside the ytcp-checkbox-lit element itself —
-// it lives in the parent <label>'s innerText (which pierces shadow). The
-// click target needs to be the checkbox-lit itself; clicking the label is
-// less reliable than clicking the checkbox area directly.
+// Matching strategy, in priority order:
+//  1. First non-empty line of the row's text equals name (case-insensitive).
+//     The playlist title renders on line 1; subsequent lines are metadata
+//     like "12 videos" or "Private".
+//  2. Any line in the row's text equals name (case-insensitive). Covers
+//     layouts where the title isn't on line 1.
+//
+// On failure, samples are returned in JSON so the caller can log what
+// candidate row texts were actually present.
 func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.Action {
 	js := fmt.Sprintf(`
 		(() => {
@@ -1037,12 +1059,12 @@ func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.
 				}
 			}
 			let target = null;
+			const samples = [];
 			walk(document, root => {
 				if (target) return;
 				root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
 					if (target || el.offsetParent === null) return;
-					// Climb to nearest container (<label> for legacy, <tr>/<div> elsewhere)
-					// and read its full text — that's where the playlist title lives.
+					// Climb to the nearest ancestor with non-empty text.
 					let p = el;
 					let text = '';
 					for (let i = 0; i < 4 && p; i++) {
@@ -1050,12 +1072,15 @@ func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.
 						if (t) { text = t; break; }
 						p = p.parentElement;
 					}
-					if (text.toLowerCase() === wantName) {
-						target = el;
-					}
+					if (!text) return;
+					const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+					const first = (lines[0] || '').toLowerCase();
+					if (first === wantName) { target = el; return; }
+					if (lines.some(l => l.toLowerCase() === wantName)) { target = el; return; }
+					if (samples.length < 8) samples.push(lines.slice(0, 2).join(' / '));
 				});
 			});
-			if (!target) return JSON.stringify({info: ''});
+			if (!target) return JSON.stringify({info: '', samples});
 			const r = target.getBoundingClientRect();
 			return JSON.stringify({
 				x: r.left + r.width / 2,
@@ -1070,15 +1095,87 @@ func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.
 			return err
 		}
 		var out struct {
-			X, Y float64
-			Info string
+			X, Y    float64
+			Info    string
+			Samples []string
 		}
 		if err := json.Unmarshal([]byte(raw), &out); err != nil {
 			return fmt.Errorf("parse locate result %q: %w", raw, err)
 		}
-		*x, *y, *info = out.X, out.Y, out.Info
+		*x, *y = out.X, out.Y
+		if out.Info == "" && len(out.Samples) > 0 {
+			*info = ""
+			// Pack samples into the trailing error path via a sentinel:
+			// the caller logs *info verbatim on success, but on failure
+			// it tests info == "". We surface samples through the locate
+			// log too by appending them under a SAMPLES: prefix below.
+			return fmt.Errorf("no row matched; sample rows seen: %v", out.Samples)
+		}
+		*info = out.Info
 		return nil
 	})
+}
+
+// playlistFilterByName locates the playlist dropdown's search input,
+// click-focuses it via a real pointer event, then types `name` through the
+// CDP Input.insertText command. The dialog's filter listens for genuine
+// keyboard input events (not the synthetic setter-+-event pattern that works
+// for React), so we have to drive the input from above the DOM. Returns ""
+// if no visible search input is found, or a "tag :: placeholder" string for
+// logging on success.
+func playlistFilterByName(ctx context.Context, name string) (string, error) {
+	const js = `
+		(() => {
+			function walk(root, fn) {
+				fn(root);
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot, fn);
+				}
+			}
+			let input = null;
+			walk(document, root => {
+				if (input) return;
+				const cands = [
+					...root.querySelectorAll('ytcp-playlist-dialog input'),
+					...root.querySelectorAll('input[placeholder*="search" i]'),
+					...root.querySelectorAll('input[aria-label*="search" i]'),
+				];
+				const it = cands.find(el => el.offsetParent !== null);
+				if (it) input = it;
+			});
+			if (!input) return JSON.stringify({info: ''});
+			const r = input.getBoundingClientRect();
+			return JSON.stringify({
+				x: r.left + r.width / 2,
+				y: r.top + r.height / 2,
+				info: input.tagName.toLowerCase() +
+					' :: ' + (input.placeholder || input.getAttribute('aria-label') || ''),
+			});
+		})()
+	`
+	var raw string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(js, &raw)); err != nil {
+		return "", err
+	}
+	var out struct {
+		X, Y float64
+		Info string
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return "", fmt.Errorf("parse filter locate %q: %w", raw, err)
+	}
+	if out.Info == "" {
+		return "", nil
+	}
+	if err := chromedp.Run(ctx,
+		humanClick(out.X, out.Y),
+		humanSleep(150*time.Millisecond, 300*time.Millisecond),
+		input.InsertText(name),
+	); err != nil {
+		return out.Info, fmt.Errorf("insert text: %w", err)
+	}
+	return out.Info, nil
 }
 
 // shadowLocateByText walks all shadow roots to find an element matching any
