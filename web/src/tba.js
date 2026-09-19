@@ -171,6 +171,15 @@ const tba = Object.freeze({
                 "Avg Barge": r.sort5,
             });
         },
+        // REBUILT has four sort orders, not five: no coopertition column.
+        2026: function(r) {
+            return Object.assign(tba.convertToTBARankings.common(r), {
+                "Ranking Score": r.sort1,
+                "Avg Match": r.sort2,
+                "Avg Auto Fuel": r.sort3,
+                "Avg Tower": r.sort4,
+            });
+        },
     }),
 
     RANKING_NAMES: Object.freeze({
@@ -213,6 +222,12 @@ const tba = Object.freeze({
             "Avg Match",
             "Avg Auto",
             "Avg Barge",
+        ],
+        2026: [
+            "Ranking Score",
+            "Avg Match",
+            "Avg Auto Fuel",
+            "Avg Tower",
         ],
     }),
 
