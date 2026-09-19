@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"runtime/debug"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/lethosor/TBA-uploader/internal/ytstudio"
@@ -136,6 +138,17 @@ func main() {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})
+
+	// Shut the browser down on the way out; on Windows it outlives the process
+	// otherwise, and the next run then finds the profile locked.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-signals
+		log.Printf("shutting down (%s)", sig)
+		d.Close()
+		os.Exit(0)
+	}()
 
 	log.Printf("listening on %s", *addr)
 	_ = http.ListenAndServe(*addr, mux)

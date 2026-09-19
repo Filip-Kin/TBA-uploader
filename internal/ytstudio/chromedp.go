@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -31,6 +32,16 @@ type ChromedpDriver struct {
 	// tool-owned profiles unless BrowserExe says otherwise.
 	Managed *ManagedBrowser
 	Verbose bool
+
+	// One browser stays open for the whole session and each operation gets a
+	// tab in it. Starting Chrome, loading a profile and getting Studio warm
+	// again costs more than every other step of an upload put together, and at
+	// an event that happens once per match.
+	mu            sync.Mutex
+	sessionKey    string
+	allocCancel   context.CancelFunc
+	browserCtx    context.Context
+	browserCancel context.CancelFunc
 }
 
 // NewChromedpDriver returns a driver that stores profiles under profileRoot and
@@ -225,6 +236,142 @@ func DebugPortActive(port int) bool {
 	return debugPortWS(port) != ""
 }
 
+// isNoDisplayErr recognises a browser refusing to start because there is no
+// desktop to draw on.
+func isNoDisplayErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{"missing x server", "$display", "ozone", "failed to initialize"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// profileKey identifies the browser a profile needs, so a session is only
+// reused for the same one.
+func profileKey(p Profile) string {
+	if p.Live() {
+		return "live:" + p.UserDataDir + ":" + p.Directory
+	}
+	return "profile:" + p.Name
+}
+
+// tab returns a context for one operation, in a browser that stays open after
+// the operation finishes. The returned cancel closes the tab, not the browser.
+//
+// The browser is started on first use and reused until it dies or a different
+// profile is asked for. It deliberately does not hang off the caller's context,
+// which ends with the upload.
+func (d *ChromedpDriver) tab(ctx context.Context, p Profile) (context.Context, context.CancelFunc, error) {
+	d.mu.Lock()
+	key := profileKey(p)
+	if d.browserCtx != nil && (d.sessionKey != key || d.browserCtx.Err() != nil) {
+		// Wrong profile, or the operator closed the window: start over.
+		d.logf("browser session ending (%s)", d.sessionKey)
+		d.closeSessionLocked()
+	}
+	if d.browserCtx == nil {
+		// Resolve the binary under the caller's context, since this is what
+		// downloads the managed browser on a first run.
+		exe, err := d.browserFor(ctx, p)
+		if err != nil {
+			d.mu.Unlock()
+			return nil, nil, err
+		}
+		// The browser itself must outlive this request: allocating it from the
+		// caller's context kills it the moment the upload that started it
+		// finishes, which defeats the whole point of keeping it open.
+		session := p
+		session.Exe = exe
+
+		// Headed first: YT Studio serves a headless browser its
+		// unsupported-browser page. A machine with no display says so when the
+		// browser starts, and then headless is the only option there is.
+		for _, headless := range []bool{false, true} {
+			allocCtx, cancelAlloc, err := d.allocate(context.Background(), session, headless)
+			if err != nil {
+				d.mu.Unlock()
+				return nil, nil, err
+			}
+			browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+			// Start the browser now, so a failure is reported here rather than
+			// halfway through the first upload.
+			err = chromedp.Run(browserCtx)
+			if err == nil {
+				d.sessionKey = key
+				d.allocCancel = cancelAlloc
+				d.browserCtx = browserCtx
+				d.browserCancel = cancelBrowser
+				d.logf("browser session open (%s, headless=%v)", key, headless)
+				break
+			}
+			cancelBrowser()
+			cancelAlloc()
+			if !headless && isNoDisplayErr(err) {
+				d.logf("no display for a browser window, falling back to headless")
+				continue
+			}
+			d.mu.Unlock()
+			return nil, nil, wrapLiveErr(p, p.DebugPort, err)
+		}
+	}
+	browserCtx := d.browserCtx
+	d.mu.Unlock()
+
+	tabCtx, cancelTab := chromedp.NewContext(browserCtx)
+	if err := chromedp.Run(tabCtx); err != nil {
+		cancelTab()
+		// The browser went away between the check above and here.
+		d.mu.Lock()
+		d.closeSessionLocked()
+		d.mu.Unlock()
+		return nil, nil, fmt.Errorf("open tab: %w", err)
+	}
+	// A cancelled caller closes the tab, without taking the browser with it.
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancelTab()
+		case <-done:
+		case <-tabCtx.Done():
+		}
+	}()
+	return tabCtx, func() {
+		close(done)
+		cancelTab()
+	}, nil
+}
+
+// closeSessionLocked tears down the open browser. Caller holds d.mu.
+func (d *ChromedpDriver) closeSessionLocked() {
+	if d.browserCancel != nil {
+		d.browserCancel()
+	}
+	if d.allocCancel != nil {
+		d.allocCancel()
+	}
+	d.browserCtx = nil
+	d.browserCancel = nil
+	d.allocCancel = nil
+	d.sessionKey = ""
+}
+
+// Close shuts the browser down. Called when the helper exits; without it the
+// browser outlives the process on Windows.
+func (d *ChromedpDriver) Close() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.browserCtx != nil {
+		d.logf("closing browser session (%s)", d.sessionKey)
+	}
+	d.closeSessionLocked()
+}
+
 // allocate returns a chromedp allocator bound to the given profile. Callers
 // must defer the returned cancel func.
 func (d *ChromedpDriver) allocate(ctx context.Context, p Profile, headless bool) (context.Context, context.CancelFunc, error) {
@@ -369,14 +516,11 @@ func (d *ChromedpDriver) Login(ctx context.Context, p Profile) error {
 	ctx, cancelTO := context.WithTimeout(ctx, deadline)
 	defer cancelTO()
 
-	allocCtx, cancelAlloc, err := d.allocate(ctx, p, false)
+	browserCtx, closeTab, err := d.tab(ctx, p)
 	if err != nil {
 		return err
 	}
-	defer cancelAlloc()
-
-	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	defer cancelBrowser()
+	defer closeTab()
 
 	if err := chromedp.Run(browserCtx,
 		applyStealth(),
@@ -397,13 +541,11 @@ func (d *ChromedpDriver) CheckChannel(ctx context.Context, p Profile) (string, e
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	allocCtx, cancelAlloc, err := d.allocate(ctx, p, true)
+	bctx, closeTab, err := d.tab(ctx, p)
 	if err != nil {
 		return "", err
 	}
-	defer cancelAlloc()
-	bctx, cancelB := chromedp.NewContext(allocCtx)
-	defer cancelB()
+	defer closeTab()
 
 	var currentURL, channelName string
 	err = chromedp.Run(bctx,
@@ -431,13 +573,11 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 	ctx, cancelTO := context.WithTimeout(ctx, DefaultUploadDeadline)
 	defer cancelTO()
 
-	allocCtx, cancelAlloc, err := d.allocate(ctx, p, false)
+	bctx, closeTab, err := d.tab(ctx, p)
 	if err != nil {
 		return UploadResult{}, err
 	}
-	defer cancelAlloc()
-	bctx, cancelB := chromedp.NewContext(allocCtx)
-	defer cancelB()
+	defer closeTab()
 
 	visibility := strings.ToUpper(strings.TrimSpace(in.Visibility))
 	if visibility == "" {
