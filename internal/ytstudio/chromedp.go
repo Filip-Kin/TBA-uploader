@@ -821,7 +821,8 @@ func (d *ChromedpDriver) selectPlaylist(ctx context.Context, playlistName string
 	); err != nil {
 		return fmt.Errorf("click dropdown trigger: %w", err)
 	}
-	d.logf("playlist: visible-checkbox count=%s", probeDropdownState(ctx))
+	before := probeDropdownState(ctx)
+	d.logf("playlist: visible-checkbox count=%s", before)
 
 	// Step a.5: type the playlist name into the dropdown's search input.
 	// The dialog is virtualized — on channels with many playlists, most rows
@@ -837,7 +838,20 @@ func (d *ChromedpDriver) selectPlaylist(ctx context.Context, playlistName string
 		if err := chromedp.Run(ctx, humanSleep(1200*time.Millisecond, 1800*time.Millisecond)); err != nil {
 			return err
 		}
-		d.logf("playlist: post-filter count=%s", probeDropdownState(ctx))
+		after := probeDropdownState(ctx)
+		d.logf("playlist: post-filter count=%s", after)
+		// A filter that hides everything is worse than no filter: whatever it
+		// typed into, it was not the dropdown's own search.
+		if visibleRowCount(after) == 0 && visibleRowCount(before) > 0 {
+			d.logf("playlist: filter left no rows, clearing it and listing everything")
+			if err := clearPlaylistFilter(ctx); err != nil {
+				d.logf("playlist: could not clear the filter: %v", err)
+			}
+			if err := chromedp.Run(ctx, humanSleep(900*time.Millisecond, 1300*time.Millisecond)); err != nil {
+				return err
+			}
+			d.logf("playlist: post-clear count=%s", probeDropdownState(ctx))
+		}
 	}
 
 	// Step b: find the checkbox row whose label exactly matches playlistName
@@ -1016,6 +1030,55 @@ func waitDialogHidden(ctx context.Context, timeout time.Duration) error {
 		}
 	}
 	return errors.New("playlist dialog still visible")
+}
+
+// visibleRowCount reads the leading number out of probeDropdownState's
+// "<n> visible, <m> checked".
+func visibleRowCount(state string) int {
+	n := 0
+	if _, err := fmt.Sscanf(state, "%d visible", &n); err != nil {
+		return -1
+	}
+	return n
+}
+
+// clearPlaylistFilter empties the dropdown's search box, so the full list comes
+// back when a filter turned out to be the wrong move.
+func clearPlaylistFilter(ctx context.Context) error {
+	const js = `
+		(() => {
+			function walk(root, fn) {
+				fn(root);
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot, fn);
+				}
+			}
+			let cleared = false;
+			walk(document, root => {
+				root.querySelectorAll('input').forEach(el => {
+					if (cleared || el.offsetParent === null || !el.value) return;
+					const label = ((el.placeholder || '') + ' ' +
+						(el.getAttribute('aria-label') || '')).toLowerCase();
+					if (label.includes('across your channel')) return;
+					el.focus();
+					el.value = '';
+					el.dispatchEvent(new Event('input', {bubbles: true}));
+					el.dispatchEvent(new Event('change', {bubbles: true}));
+					cleared = true;
+				});
+			});
+			return cleared;
+		})()
+	`
+	var cleared bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(js, &cleared)); err != nil {
+		return err
+	}
+	if !cleared {
+		return errors.New("no filter input to clear")
+	}
+	return nil
 }
 
 // probeDropdownState returns how many ytcp-checkbox-lit elements are visible
@@ -1636,6 +1699,11 @@ func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.
 // if no visible search input is found, or a "tag :: placeholder" string for
 // logging on success.
 func playlistFilterByName(ctx context.Context, name string) (string, error) {
+	// The input has to be the one inside the open playlist dropdown. Studio's
+	// own "Search across your channel" box at the top of the page also matches
+	// any sensible search-input selector, and typing a playlist name into that
+	// filters the page instead of the dropdown, leaving the dropdown empty and
+	// the playlist "not found".
 	const js = `
 		(() => {
 			function walk(root, fn) {
@@ -1645,17 +1713,38 @@ func playlistFilterByName(ctx context.Context, name string) (string, error) {
 					if (el.shadowRoot) walk(el.shadowRoot, fn);
 				}
 			}
-			let input = null;
+			const visible = el => el && el.offsetParent !== null;
+			const isChannelSearch = el => {
+				const label = ((el.placeholder || '') + ' ' +
+					(el.getAttribute('aria-label') || '')).toLowerCase();
+				return label.includes('across your channel') || label.includes('search across');
+			};
+
+			// Containers that could be the open dropdown: they hold the playlist
+			// checkbox rows.
+			const containers = [];
 			walk(document, root => {
-				if (input) return;
-				const cands = [
-					...root.querySelectorAll('ytcp-playlist-dialog input'),
-					...root.querySelectorAll('input[placeholder*="search" i]'),
-					...root.querySelectorAll('input[aria-label*="search" i]'),
-				];
-				const it = cands.find(el => el.offsetParent !== null);
-				if (it) input = it;
+				root.querySelectorAll(
+					'ytcp-playlist-dialog, tp-yt-paper-dialog, tp-yt-iron-dropdown, ytcp-dropdown-dialog'
+				).forEach(el => {
+					if (visible(el)) containers.push(el);
+				});
 			});
+			let input = null;
+			for (const container of containers) {
+				let hasRows = false;
+				const inputs = [];
+				walk(container, root => {
+					if (root.querySelector && root.querySelector('ytcp-checkbox-lit')) hasRows = true;
+					root.querySelectorAll('input').forEach(el => {
+						if (visible(el) && !isChannelSearch(el)) inputs.push(el);
+					});
+				});
+				if (!hasRows || !inputs.length) continue;
+				input = inputs[0];
+				break;
+			}
+			// No scoped input: filter nothing rather than typing into the page.
 			if (!input) return JSON.stringify({info: ''});
 			const r = input.getBoundingClientRect();
 			return JSON.stringify({

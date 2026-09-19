@@ -13,15 +13,15 @@ func TestTbaMatchKey(t *testing.T) {
 		want     string
 	}{
 		// FIM-AV in-season names
-		{"QM5_MIKET.mp4", "2026fsu_qm5"},
-		{"QM12_P2_MIKET.mp4", "2026fsu_qm12"}, // a replay is still the same match
-		{"SF3M1_MIKET.mp4", "2026fsu_sf3m1"},
-		{"SF13M1_MIKET.mp4", "2026fsu_sf13m1"},
-		{"F1M2_MIKET.mp4", "2026fsu_f1m2"},
+		{"QM5_MIKET.mp4", "qm5"},
+		{"QM12_P2_MIKET.mp4", "qm12"}, // a replay is still the same match
+		{"SF3M1_MIKET.mp4", "sf3m1"},
+		{"SF13M1_MIKET.mp4", "sf13m1"},
+		{"F1M2_MIKET.mp4", "f1m2"},
 		// TBA-uploader's own names
-		{"2026 FSU Roboday Qualification Match 7.mp4", "2026fsu_qm7"},
-		{"2026 FSU Roboday Playoff Match 4.mp4", "2026fsu_sf4m1"},
-		{"2026 FSU Roboday Final Match 1.mp4", "2026fsu_f1m1"},
+		{"2026 FSU Roboday Qualification Match 7.mp4", "qm7"},
+		{"2026 FSU Roboday Playoff Match 4.mp4", "sf4m1"},
+		{"2026 FSU Roboday Final Match 1.mp4", "f1m1"},
 		// Not matches TBA tracks
 		{"zz_PR1_MIKET.mp4", ""},
 		{"zz_TM1_MIKET.mp4", ""},
@@ -36,7 +36,7 @@ func TestTbaMatchKey(t *testing.T) {
 			}
 			continue
 		}
-		if got := tbaMatchKey("2026fsu", p); got != c.want {
+		if got := tbaMatchKey(p); got != c.want {
 			t.Errorf("tbaMatchKey(%q) = %q, want %q", c.filename, got, c.want)
 		}
 	}
@@ -44,21 +44,15 @@ func TestTbaMatchKey(t *testing.T) {
 	// Playoff numbering past the bracket's elimination matches becomes finals,
 	// which is how FMS numbers them.
 	p, _ := parseFilename("2026 FSU Roboday Playoff Match 14.mp4")
-	if got := tbaMatchKey("2026fsu", p); got != "2026fsu_f1m1" {
-		t.Errorf("playoff 14 = %q, want 2026fsu_f1m1", got)
-	}
-
-	// No event key, no link.
-	p, _ = parseFilename("QM5_MIKET.mp4")
-	if got := tbaMatchKey("", p); got != "" {
-		t.Errorf("empty event key produced %q", got)
+	if got := tbaMatchKey(p); got != "f1m1" {
+		t.Errorf("playoff 14 = %q, want f1m1", got)
 	}
 }
 
 func TestFillMetaFromFilename(t *testing.T) {
 	entry := &videoEntry{}
-	fillMetaFromFilename(entry, "QM5_MIKET.mp4", "2026fsu")
-	if entry.Meta == nil || entry.Meta.TBAMatchKey != "2026fsu_qm5" {
+	fillMetaFromFilename(entry, "QM5_MIKET.mp4")
+	if entry.Meta == nil || entry.Meta.TBAMatchKey != "qm5" {
 		t.Fatalf("meta = %+v", entry.Meta)
 	}
 	if entry.Meta.MatchLabel != "Qualification 5" || entry.Meta.MatchNumber != 5 || entry.Meta.Play != 1 {
@@ -67,18 +61,18 @@ func TestFillMetaFromFilename(t *testing.T) {
 
 	// Richer meta from /api/rename must not be overwritten.
 	existing := &videoEntry{Meta: &videoMeta{
-		TBAMatchKey: "2026fsu_qm9",
+		TBAMatchKey: "qm9",
 		MatchLabel:  "Qualification 9",
 		Alliances:   map[string][]allianceTeam{"red": {{Number: 2767, Name: "Stryke Force"}}},
 	}}
-	fillMetaFromFilename(existing, "QM5_MIKET.mp4", "2026fsu")
-	if existing.Meta.TBAMatchKey != "2026fsu_qm9" || len(existing.Meta.Alliances) != 1 {
+	fillMetaFromFilename(existing, "QM5_MIKET.mp4")
+	if existing.Meta.TBAMatchKey != "qm9" || len(existing.Meta.Alliances) != 1 {
 		t.Errorf("existing meta was disturbed: %+v", existing.Meta)
 	}
 
 	// A practice recording gets no key, and no empty meta object either.
 	practice := &videoEntry{}
-	fillMetaFromFilename(practice, "zz_PR1_MIKET.mp4", "2026fsu")
+	fillMetaFromFilename(practice, "zz_PR1_MIKET.mp4")
 	if practice.Meta != nil {
 		t.Errorf("practice meta = %+v, want nil", practice.Meta)
 	}
@@ -111,7 +105,7 @@ func TestScanFillsTbaMatchKey(t *testing.T) {
 
 	videos := store.snapshot().Videos
 	qm := videos["QM5_MIKET.mp4"]
-	if qm == nil || qm.Meta == nil || qm.Meta.TBAMatchKey != "2026fsu_qm5" {
+	if qm == nil || qm.Meta == nil || qm.Meta.TBAMatchKey != "qm5" {
 		t.Errorf("qualification entry meta = %+v", qm)
 	}
 	if pr := videos["zz_PR1_MIKET.mp4"]; pr != nil && pr.Meta != nil {

@@ -21,26 +21,27 @@ import (
 // assumes the same thing.
 const playoffBracket = tba.BRACKET_TYPE_DOUBLE_ELIM_8_TEAM
 
-// tbaMatchKey returns the TBA match key for a parsed filename, or "" when the
-// filename is not a match TBA knows about (practice, test, manual) or the event
-// key is unknown.
-func tbaMatchKey(eventKey string, p parsedFilename) string {
-	if eventKey == "" {
-		return ""
-	}
+// tbaMatchKey returns the match key for a parsed filename, or "" when the
+// filename is not a match TBA knows about (practice, test, manual).
+//
+// This is the partial key, with no event prefix: "qm5", "sf3m1", "f1m1". That is
+// what the rest of the app keys matches by, from the TBA match list
+// (match.key.split("_")[1]) through to what the trusted API is sent, so a full
+// "2026fsu_qm5" here links to nothing and submits nothing.
+func tbaMatchKey(p parsedFilename) string {
 	switch strings.ToLower(p.Level) {
 	case "qualification":
-		return fmt.Sprintf("%s_qm%d", eventKey, p.MatchNumber)
+		return fmt.Sprintf("qm%d", p.MatchNumber)
 	case "final":
 		// FIM-AV already separates finals out (F1M2), so the number is the
 		// match within the single finals set.
-		return fmt.Sprintf("%s_f1m%d", eventKey, p.MatchNumber)
+		return fmt.Sprintf("f1m%d", p.MatchNumber)
 	case "playoff":
 		code := tba.GetPlayoffCode(playoffBracket, p.MatchNumber)
 		if code.Level == "" {
 			return ""
 		}
-		return fmt.Sprintf("%s_%s%dm%d", eventKey, code.Level, code.Set, code.Match)
+		return fmt.Sprintf("%s%dm%d", code.Level, code.Set, code.Match)
 	}
 	return ""
 }
@@ -48,7 +49,7 @@ func tbaMatchKey(eventKey string, p parsedFilename) string {
 // fillMetaFromFilename gives an entry the match identity its filename implies,
 // without disturbing anything richer that /api/rename may have supplied. The
 // alliance data stays absent, so description templates behave exactly as before.
-func fillMetaFromFilename(entry *videoEntry, filename, eventKey string) {
+func fillMetaFromFilename(entry *videoEntry, filename string) {
 	if entry == nil {
 		return
 	}
@@ -59,7 +60,7 @@ func fillMetaFromFilename(entry *videoEntry, filename, eventKey string) {
 	if !ok {
 		return
 	}
-	key := tbaMatchKey(eventKey, p)
+	key := tbaMatchKey(p)
 	if key == "" {
 		return
 	}
