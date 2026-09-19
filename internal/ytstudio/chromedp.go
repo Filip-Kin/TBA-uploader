@@ -594,16 +594,19 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 	}
 
 	// Step 9: add to playlist (optional). Reopens the edit dialog.
+	playlistError := ""
 	if in.PlaylistName != "" {
 		if err := d.addToPlaylist(bctx, videoID, in.PlaylistName); err != nil {
 			d.logf("add-to-playlist failed: %v", err)
-			// Non-fatal — operator can fix manually.
+			// Non-fatal: the video is up, and the operator can fix the playlist
+			// by hand. Reported so they know to.
+			playlistError = err.Error()
 		} else {
 			d.logf("added to playlist %q", in.PlaylistName)
 		}
 	}
 
-	return UploadResult{VideoID: videoID, ChannelName: channelName}, nil
+	return UploadResult{VideoID: videoID, ChannelName: channelName, PlaylistError: playlistError}, nil
 }
 
 // addToPlaylist opens https://studio.youtube.com/video/<id>/edit, opens the
@@ -689,7 +692,26 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	); err != nil {
 		return fmt.Errorf("click playlist row: %w", err)
 	}
-	d.logf("playlist: post-row state=%s", probeRowChecked(ctx, playlistName))
+	state := probeRowChecked(ctx, playlistName)
+	d.logf("playlist: post-row state=%s", state)
+	if !strings.Contains(state, "aria=true") {
+		// The coordinate click can land on the row without toggling it when the
+		// virtualized list shifts under the pointer. Click the element itself.
+		d.logf("playlist: row not ticked, clicking it directly")
+		if err := chromedp.Run(ctx, clickPlaylistRow(playlistName)); err != nil {
+			d.logf("playlist: direct click failed: %v", err)
+		}
+		if err := chromedp.Run(ctx, humanSleep(600*time.Millisecond, 900*time.Millisecond)); err != nil {
+			return err
+		}
+		state = probeRowChecked(ctx, playlistName)
+		d.logf("playlist: post-retry state=%s", state)
+	}
+	if !strings.Contains(state, "aria=true") {
+		// Saying nothing here is how a video quietly ends up outside the
+		// playlist, so make it an error the operator can see.
+		return fmt.Errorf("playlist %q did not tick (state %s)", playlistName, state)
+	}
 
 	// Step c: click Done to close the dropdown.
 	d.logf("playlist: locate Done")
@@ -853,7 +875,8 @@ func probeDropdownState(ctx context.Context) string {
 // underlying ytcp-checkbox-lit.
 func probeRowChecked(ctx context.Context, name string) string {
 	js := fmt.Sprintf(`(() => {
-		const want = %q.toLowerCase();
+		%s
+		const want = normalizeName(%q);
 		function walk(root, fn) {
 			fn(root);
 			const all = root.querySelectorAll('*');
@@ -862,16 +885,12 @@ func probeRowChecked(ctx context.Context, name string) string {
 			}
 		}
 		let found = null;
+		let best = 0;
 		walk(document, root => {
 			root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
-				if (found || el.offsetParent === null) return;
-				let p = el, text = '';
-				for (let i = 0; i < 4 && p; i++) {
-					const t = (p.innerText || p.textContent || '').trim();
-					if (t) { text = t; break; }
-					p = p.parentElement;
-				}
-				if (text.toLowerCase() === want) found = el;
+				if (el.offsetParent === null) return;
+				const score = matchScore(rowLabel(el), want);
+				if (score > best) { best = score; found = el; }
 			});
 		});
 		if (!found) return 'not-found';
@@ -879,7 +898,7 @@ func probeRowChecked(ctx context.Context, name string) string {
 		const hasChecked = found.hasAttribute('checked');
 		const innerChecked = found.shadowRoot ? !!found.shadowRoot.querySelector('[checked]') : null;
 		return 'aria=' + ariaChecked + ' attr=' + hasChecked + ' inner=' + innerChecked;
-	})()`, name)
+	})()`, jsPlaylistMatch, name)
 	var out string
 	_ = chromedp.Run(ctx, chromedp.Evaluate(js, &out))
 	return out
@@ -1288,10 +1307,13 @@ func shadowLocateBySelector(selectors []string, x, y *float64, info *string) chr
 //
 // On failure, samples are returned in JSON so the caller can log what
 // candidate row texts were actually present.
-func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.Action {
+// clickPlaylistRow clicks the matched row through the DOM, for when a
+// coordinate click lands but does not toggle the checkbox.
+func clickPlaylistRow(name string) chromedp.Action {
 	js := fmt.Sprintf(`
 		(() => {
-			const wantName = %q.toLowerCase();
+			%s
+			const want = normalizeName(%q);
 			function walk(root, fn) {
 				fn(root);
 				const all = root.querySelectorAll('*');
@@ -1300,25 +1322,99 @@ func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.
 				}
 			}
 			let target = null;
+			let best = 0;
+			walk(document, root => {
+				root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
+					if (el.offsetParent === null) return;
+					const score = matchScore(rowLabel(el), want);
+					if (score > best) { best = score; target = el; }
+				});
+			});
+			if (!target) return false;
+			// The label wrapping the checkbox is what a person clicks; fall
+			// back to the checkbox itself.
+			const label = target.closest('label') ||
+				target.parentElement?.querySelector('label') || target;
+			label.click();
+			return true;
+		})()
+	`, jsPlaylistMatch, name)
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var clicked bool
+		if err := chromedp.Evaluate(js, &clicked).Do(ctx); err != nil {
+			return err
+		}
+		if !clicked {
+			return fmt.Errorf("playlist row %q not found for direct click", name)
+		}
+		return nil
+	})
+}
+
+// jsPlaylistMatch is shared by the row locator and the checked-state probe so
+// they agree on what counts as the right row.
+//
+// Studio's labels are not literal: they carry stray whitespace, a video count on
+// the following line, and get truncated with an ellipsis when long. Matching on
+// exact equality misses all of that, and a playlist that looks right on screen
+// then "isn't in the dropdown".
+const jsPlaylistMatch = `
+	function normalizeName(s) {
+		return (s || '')
+			.replace(/\u200b|\u200e|\u200f/g, '')
+			.replace(/[\u2026]|\.\.\.$/g, '')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.toLowerCase();
+	}
+	function rowLabel(el) {
+		let p = el, text = '';
+		for (let i = 0; i < 4 && p; i++) {
+			const t = (p.innerText || p.textContent || '').trim();
+			if (t) { text = t; break; }
+			p = p.parentElement;
+		}
+		return text;
+	}
+	// 0 = no match, 3 = exact, 2 = label is a truncated form of the name,
+	// 1 = the name appears inside the label.
+	function matchScore(label, want) {
+		const lines = (label || '').split('\n').map(normalizeName).filter(Boolean);
+		if (!lines.length) return 0;
+		if (lines.some(l => l === want)) return 3;
+		if (lines.some(l => l.length > 3 && want.startsWith(l))) return 2;
+		if (lines.some(l => l.includes(want))) return 1;
+		return 0;
+	}
+`
+
+func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.Action {
+	js := fmt.Sprintf(`
+		(() => {
+			%s
+			const wantName = normalizeName(%q);
+			function walk(root, fn) {
+				fn(root);
+				const all = root.querySelectorAll('*');
+				for (const el of all) {
+					if (el.shadowRoot) walk(el.shadowRoot, fn);
+				}
+			}
+			let target = null;
+			let best = 0;
 			const samples = [];
 			walk(document, root => {
-				if (target) return;
 				root.querySelectorAll('ytcp-checkbox-lit').forEach(el => {
-					if (target || el.offsetParent === null) return;
-					// Climb to the nearest ancestor with non-empty text.
-					let p = el;
-					let text = '';
-					for (let i = 0; i < 4 && p; i++) {
-						const t = (p.innerText || p.textContent || '').trim();
-						if (t) { text = t; break; }
-						p = p.parentElement;
+					if (el.offsetParent === null) return;
+					const label = rowLabel(el);
+					if (!label) return;
+					if (samples.length < 40) {
+						samples.push(label.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 2).join(' / '));
 					}
-					if (!text) return;
-					const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
-					const first = (lines[0] || '').toLowerCase();
-					if (first === wantName) { target = el; return; }
-					if (lines.some(l => l.toLowerCase() === wantName)) { target = el; return; }
-					if (samples.length < 8) samples.push(lines.slice(0, 2).join(' / '));
+					const score = matchScore(label, wantName);
+					// Keep the best match, so an exact row wins over a row that
+					// merely contains the name.
+					if (score > best) { best = score; target = el; }
 				});
 			});
 			if (!target) return JSON.stringify({info: '', samples});
@@ -1326,10 +1422,10 @@ func shadowLocatePlaylistRow(name string, x, y *float64, info *string) chromedp.
 			return JSON.stringify({
 				x: r.left + r.width / 2,
 				y: r.top + r.height / 2,
-				info: target.tagName.toLowerCase() + (target.id ? '#' + target.id : ''),
+				info: target.tagName.toLowerCase() + (target.id ? '#' + target.id : '') + ' match=' + best,
 			});
 		})()
-	`, name)
+	`, jsPlaylistMatch, name)
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		var raw string
 		if err := chromedp.Evaluate(js, &raw).Do(ctx); err != nil {

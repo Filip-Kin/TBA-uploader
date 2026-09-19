@@ -67,6 +67,10 @@ type UploadInput struct {
 type UploadResult struct {
 	VideoID     string
 	ChannelName string
+	// PlaylistError is set when the video uploaded but could not be added to
+	// the playlist. The upload still counts; this is here so the operator finds
+	// out now instead of noticing an empty playlist later.
+	PlaylistError string
 }
 
 // Driver is the operation set the worker depends on. Real implementation is

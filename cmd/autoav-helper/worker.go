@@ -302,7 +302,12 @@ func (m *uploadManager) uploadOne() {
 		v.YTVideoID = result.VideoID
 		v.UploadedAt = time.Now().UTC().Format(time.RFC3339)
 		v.TitleUsed = target.title
+		// The upload worked; a playlist failure is surfaced here rather than
+		// leaving the operator to spot a short playlist after the event.
 		v.LastError = ""
+		if result.PlaylistError != "" {
+			v.LastError = "playlist: " + result.PlaylistError
+		}
 		v.NextAttempt = 0
 		if result.ChannelName != "" {
 			s.LastChannelName = result.ChannelName
