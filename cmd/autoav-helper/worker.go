@@ -238,8 +238,8 @@ func (m *uploadManager) uploadOne() {
 		return
 	}
 	cfg := m.store.snapshot().Config
-	if cfg.ProfileName == "" {
-		log.Printf("upload: profile_name not set, skipping %s", target.filename)
+	if cfg.ProfileName == "" && cfg.BrowserUserDataDir == "" {
+		log.Printf("upload: no profile set, skipping %s", target.filename)
 		return
 	}
 
@@ -251,7 +251,7 @@ func (m *uploadManager) uploadOne() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	result, err := m.driver.Upload(ctx, cfg.ProfileName, ytstudio.UploadInput{
+	result, err := m.driver.Upload(ctx, browserProfile(cfg), ytstudio.UploadInput{
 		VideoPath:     filepath.Join(settings.VideoDir, target.filename),
 		Title:         target.title,
 		Description:   target.description,

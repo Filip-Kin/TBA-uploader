@@ -13,6 +13,8 @@ import (
 	"path"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +109,7 @@ func main() {
 	handle(http.MethodPost, "/api/upload/retry", apiUploadRetry)
 	handle(http.MethodPost, "/api/upload/skip", apiUploadSkip)
 	handle(http.MethodGet, "/api/upload/profiles", apiUploadListProfiles)
+	handle(http.MethodGet, "/api/upload/browser", apiUploadBrowser)
 	handle(http.MethodPost, "/api/upload/profile/login", apiUploadProfileLogin)
 	handle(http.MethodGet, "/api/upload/profile/check", apiUploadProfileCheck)
 	// POST sets, DELETE clears.
@@ -496,6 +499,79 @@ func apiUploadSkip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
+// browserProfile builds the driver profile from an event's config. A
+// configured browser user-data dir wins: that is the operator's own signed-in
+// browser profile, and using it means no separate sign-in to keep alive.
+func browserProfile(cfg eventConfig) ytstudio.Profile {
+	return ytstudio.Profile{
+		Name:        cfg.ProfileName,
+		UserDataDir: cfg.BrowserUserDataDir,
+		Directory:   cfg.BrowserProfileDirectory,
+		DebugPort:   cfg.BrowserDebugPort,
+		Exe:         cfg.BrowserExe,
+	}
+}
+
+// profileForRequest resolves the profile to drive for a login/check request.
+// With an event_key it uses that event's browser settings; otherwise it falls
+// back to a tool-owned profile by name.
+func profileForRequest(eventKey, profileName string) ytstudio.Profile {
+	if eventKey != "" {
+		if m, err := getOrCreateManager(eventKey); err == nil {
+			cfg := m.store.snapshot().Config
+			if profileName != "" {
+				cfg.ProfileName = profileName
+			}
+			return browserProfile(cfg)
+		}
+	}
+	return ytstudio.Profile{Name: profileName}
+}
+
+// apiUploadBrowser reports the installed browsers' profile folders, so the UI
+// can offer the live profile instead of asking the operator to sign in again.
+func apiUploadBrowser(w http.ResponseWriter, r *http.Request) {
+	userDataDir := r.URL.Query().Get("user_data_dir")
+	dirs := ytstudio.LiveProfileDirs()
+	if userDataDir == "" && len(dirs) > 0 {
+		userDataDir = dirs[0]
+	}
+	port := 0
+	if v := r.URL.Query().Get("debug_port"); v != "" {
+		port, _ = strconv.Atoi(v)
+	}
+	writeJSON(w, map[string]any{
+		"user_data_dirs":     dirs,
+		"profile_dirs":       browserProfileDirs(userDataDir),
+		"default_debug_port": ytstudio.DefaultDebugPort,
+		"debug_port_active":  ytstudio.DebugPortActive(port),
+	})
+}
+
+// browserProfileDirs lists the profile folders inside a browser user-data
+// directory. A profile folder is one holding a Preferences file.
+func browserProfileDirs(userDataDir string) []string {
+	out := []string{}
+	if userDataDir == "" {
+		return out
+	}
+	entries, err := os.ReadDir(userDataDir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(userDataDir, e.Name(), "Preferences")); err != nil {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	sort.Strings(out)
+	return out
+}
+
 func apiUploadListProfiles(w http.ResponseWriter, r *http.Request) {
 	profiles, err := listProfiles()
 	if err != nil {
@@ -508,8 +584,14 @@ func apiUploadListProfiles(w http.ResponseWriter, r *http.Request) {
 func apiUploadProfileLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ProfileName string `json:"profile_name"`
+		EventKey    string `json:"event_key"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ProfileName == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	profile := profileForRequest(body.EventKey, body.ProfileName)
+	if profile.Name == "" && !profile.Live() {
 		writeJSONError(w, http.StatusBadRequest, "profile_name required")
 		return
 	}
@@ -517,17 +599,17 @@ func apiUploadProfileLogin(w http.ResponseWriter, r *http.Request) {
 	// goroutine so the HTTP request returns immediately; the operator
 	// closes the window to finish. Use context.Background() because
 	// r.Context() is canceled the moment we write the response.
-	go func(name string) {
-		if err := driver.Login(context.Background(), name); err != nil {
-			log.Printf("login (%s): %v", name, err)
+	go func(p ytstudio.Profile) {
+		if err := driver.Login(context.Background(), p); err != nil {
+			log.Printf("login (%s): %v", p.Label(), err)
 		}
-	}(body.ProfileName)
+	}(profile)
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func apiUploadProfileCheck(w http.ResponseWriter, r *http.Request) {
-	profile := r.URL.Query().Get("profile_name")
-	if profile == "" {
+	profile := profileForRequest(r.URL.Query().Get("event_key"), r.URL.Query().Get("profile_name"))
+	if profile.Name == "" && !profile.Live() {
 		writeJSONError(w, http.StatusBadRequest, "profile_name required")
 		return
 	}

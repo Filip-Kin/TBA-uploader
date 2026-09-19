@@ -63,3 +63,64 @@ func TestStateStoreSnapshotIsCopy(t *testing.T) {
 		t.Fatal("snapshot leaked a live reference")
 	}
 }
+
+// A configured live browser profile has to reach the driver, otherwise uploads
+// run in the tool's own profile and ask for a second sign-in.
+func TestBrowserProfileFromConfig(t *testing.T) {
+	cfg := eventConfig{
+		ProfileName:             "tornado-tumble",
+		BrowserUserDataDir:      `C:\Users\filip\AppData\Local\Google\Chrome\User Data`,
+		BrowserProfileDirectory: "Profile 2",
+		BrowserDebugPort:        9222,
+		BrowserExe:              `C:\Program Files\Google\Chrome\Application\chrome.exe`,
+	}
+	p := browserProfile(cfg)
+	if !p.Live() {
+		t.Fatal("configured user-data dir did not produce a live profile")
+	}
+	if p.Directory != "Profile 2" || p.DebugPort != 9222 || p.Exe != cfg.BrowserExe {
+		t.Errorf("profile = %+v", p)
+	}
+	if p.Name != "tornado-tumble" {
+		t.Errorf("profile name = %q", p.Name)
+	}
+
+	// No browser settings: fall back to the tool's own profile.
+	p = browserProfile(eventConfig{ProfileName: "tornado-tumble"})
+	if p.Live() {
+		t.Error("empty user-data dir produced a live profile")
+	}
+}
+
+// Login and channel-check requests without an event key still work against a
+// tool-owned profile.
+func TestProfileForRequestFallsBackToName(t *testing.T) {
+	p := profileForRequest("", "tornado-tumble")
+	if p.Live() || p.Name != "tornado-tumble" {
+		t.Errorf("profile = %+v", p)
+	}
+}
+
+func TestBrowserProfileDirs(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Default", "Profile 2"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name, "Preferences"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Not a profile: no Preferences file.
+	if err := os.MkdirAll(filepath.Join(dir, "ShaderCache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := browserProfileDirs(dir)
+	if len(got) != 2 || got[0] != "Default" || got[1] != "Profile 2" {
+		t.Errorf("profile dirs = %v", got)
+	}
+	if len(browserProfileDirs("")) != 0 {
+		t.Error("empty user-data dir should list nothing")
+	}
+}

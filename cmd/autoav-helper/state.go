@@ -36,6 +36,16 @@ type eventConfig struct {
 	ThumbnailPath       string `json:"thumbnail_path"`
 	IncludePractice     bool   `json:"include_practice"`
 	IncludeTest         bool   `json:"include_test"`
+	// Browser* point the driver at an installed browser's own profile instead
+	// of a profile this tool owns, so there is no second YouTube sign-in.
+	// BrowserUserDataDir is the browser's "User Data" folder,
+	// BrowserProfileDirectory the profile inside it ("Default", "Profile 2"),
+	// BrowserDebugPort the CDP port to attach to when the browser is already
+	// running, and BrowserExe an explicit browser binary.
+	BrowserUserDataDir      string `json:"browser_user_data_dir,omitempty"`
+	BrowserProfileDirectory string `json:"browser_profile_directory,omitempty"`
+	BrowserDebugPort        int    `json:"browser_debug_port,omitempty"`
+	BrowserExe              string `json:"browser_exe,omitempty"`
 	// CutWaitSeconds is the grace period given to FIM-AV Assistant to queue a
 	// dead-time cut before a recording is treated as final. 0 uses the default
 	// (see defaultCutWaitSeconds); a negative value uploads recordings as soon

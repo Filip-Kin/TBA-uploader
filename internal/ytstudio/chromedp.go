@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,8 +43,25 @@ func (d *ChromedpDriver) logf(format string, args ...any) {
 	}
 }
 
-// findBrowser returns an absolute path to a Brave/Edge/Chrome binary.
-func (d *ChromedpDriver) findBrowser() (string, error) {
+// browserFamily guesses which browser owns a user-data directory from its
+// path, so a live Chrome profile is driven by chrome.exe and not by whichever
+// Chromium happens to be installed first.
+func browserFamily(userDataDir string) string {
+	p := strings.ToLower(filepath.ToSlash(userDataDir))
+	switch {
+	case strings.Contains(p, "bravesoftware"), strings.Contains(p, "brave"):
+		return "brave"
+	case strings.Contains(p, "microsoft/edge"), strings.Contains(p, "edge"):
+		return "edge"
+	case strings.Contains(p, "google/chrome"), strings.Contains(p, "chrome"):
+		return "chrome"
+	}
+	return ""
+}
+
+// findBrowser returns an absolute path to a Brave/Edge/Chrome binary. When
+// userDataDir is a live profile, the browser that owns it is tried first.
+func (d *ChromedpDriver) findBrowser(userDataDir string) (string, error) {
 	if d.BrowserExe != "" {
 		return d.BrowserExe, nil
 	}
@@ -78,6 +97,17 @@ func (d *ChromedpDriver) findBrowser() (string, error) {
 			"/usr/bin/chromium",
 		}
 	}
+	if family := browserFamily(userDataDir); family != "" {
+		var preferred, rest []string
+		for _, c := range candidates {
+			if strings.Contains(strings.ToLower(c), family) {
+				preferred = append(preferred, c)
+			} else {
+				rest = append(rest, c)
+			}
+		}
+		candidates = append(preferred, rest...)
+	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c, nil
@@ -86,22 +116,96 @@ func (d *ChromedpDriver) findBrowser() (string, error) {
 	return "", errors.New("ytstudio: no Brave/Edge/Chrome binary found (set browser_exe in config)")
 }
 
-// allocate returns a chromedp ExecAllocator bound to the given profile.
-// Callers must defer the returned cancel func.
-func (d *ChromedpDriver) allocate(ctx context.Context, profileName string, headless bool) (context.Context, context.CancelFunc, error) {
-	if profileName == "" {
+// DefaultDebugPort is the CDP port used for live profiles when none is set.
+const DefaultDebugPort = 9222
+
+// LiveProfileDirs returns the installed browsers' user-data directories that
+// exist on this machine, most likely first. Used to prefill the config.
+func LiveProfileDirs() []string {
+	var candidates []string
+	switch runtime.GOOS {
+	case "windows":
+		local := os.Getenv("LOCALAPPDATA")
+		candidates = []string{
+			filepath.Join(local, "Google", "Chrome", "User Data"),
+			filepath.Join(local, "BraveSoftware", "Brave-Browser", "User Data"),
+			filepath.Join(local, "Microsoft", "Edge", "User Data"),
+		}
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		candidates = []string{
+			filepath.Join(home, "Library", "Application Support", "Google", "Chrome"),
+			filepath.Join(home, "Library", "Application Support", "BraveSoftware", "Brave-Browser"),
+			filepath.Join(home, "Library", "Application Support", "Microsoft Edge"),
+		}
+	default:
+		home, _ := os.UserHomeDir()
+		candidates = []string{
+			filepath.Join(home, ".config", "google-chrome"),
+			filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser"),
+			filepath.Join(home, ".config", "microsoft-edge"),
+		}
+	}
+	out := []string{}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// debugPortWS asks a running browser for its DevTools websocket URL. Empty
+// string means nothing is listening on that port.
+func debugPortWS(port int) string {
+	url := fmt.Sprintf("http://127.0.0.1:%d/json/version", port)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var body struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&body) != nil {
+		return ""
+	}
+	return body.WebSocketDebuggerURL
+}
+
+// DebugPortActive reports whether a browser is already listening for CDP on
+// the given port (0 => DefaultDebugPort).
+func DebugPortActive(port int) bool {
+	if port == 0 {
+		port = DefaultDebugPort
+	}
+	return debugPortWS(port) != ""
+}
+
+// allocate returns a chromedp allocator bound to the given profile. Callers
+// must defer the returned cancel func.
+func (d *ChromedpDriver) allocate(ctx context.Context, p Profile, headless bool) (context.Context, context.CancelFunc, error) {
+	if p.Live() {
+		return d.allocateLive(ctx, p)
+	}
+	if p.Name == "" {
 		return nil, nil, errors.New("ytstudio: profile_name is empty")
 	}
-	profileDir := filepath.Join(d.ProfileRoot, profileName)
+	profileDir := filepath.Join(d.ProfileRoot, p.Name)
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
 		return nil, nil, err
 	}
 	// Remove the SingletonLock left behind by an interrupted previous run.
 	// chromedp's "cannot start, profile in use" failures all come back to
-	// this file.
+	// this file. Only ever done for a profile we own; a live profile's lock
+	// belongs to the operator's running browser.
 	_ = os.Remove(filepath.Join(profileDir, "SingletonLock"))
 
-	exe, err := d.findBrowser()
+	exe, err := d.findBrowser("")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -137,6 +241,84 @@ func (d *ChromedpDriver) allocate(ctx context.Context, profileName string, headl
 	return allocCtx, cancel, nil
 }
 
+// allocateLive drives the operator's own installed browser profile, so there is
+// no second YouTube sign-in to keep alive.
+//
+// Preferred path: the browser is already running with CDP open on the debug
+// port, so we attach to it and never touch the window layout or the session.
+// Start it once with
+//
+//	chrome.exe --remote-debugging-port=9222
+//
+// (the profile is whatever that instance already has open). Otherwise we start
+// the browser ourselves on the configured profile with the port open, which
+// only works when that profile is not already open in another window: Chrome
+// hands a second launch off to the running instance and exits, and there is no
+// CDP endpoint to talk to. That case is reported by wrapLiveErr.
+//
+// Live runs are always headed. Chrome refuses to share a profile between a
+// headless and a headed instance, and a real profile's own user agent is what
+// gets YT Studio to behave in the first place.
+func (d *ChromedpDriver) allocateLive(ctx context.Context, p Profile) (context.Context, context.CancelFunc, error) {
+	port := p.DebugPort
+	if port == 0 {
+		port = DefaultDebugPort
+	}
+	if ws := debugPortWS(port); ws != "" {
+		d.logf("attaching to the running browser on port %d", port)
+		allocCtx, cancel := chromedp.NewRemoteAllocator(ctx, ws)
+		return allocCtx, cancel, nil
+	}
+
+	exe := p.Exe
+	if exe == "" {
+		var err error
+		exe, err = d.findBrowser(p.UserDataDir)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	dir := p.Directory
+	if dir == "" {
+		dir = "Default"
+	}
+	d.logf("starting %s on the live profile %s (%s), CDP port %d", filepath.Base(exe), dir, p.UserDataDir, port)
+	opts := []chromedp.ExecAllocatorOption{
+		chromedp.ExecPath(exe),
+		chromedp.UserDataDir(p.UserDataDir),
+		chromedp.Flag("profile-directory", dir),
+		chromedp.Flag("remote-debugging-port", strconv.Itoa(port)),
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("no-restore-last-session", true),
+		chromedp.Flag("restore-last-session", "false"),
+		chromedp.Flag("headless", false),
+		chromedp.WindowSize(1400, 900),
+	}
+	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
+	return allocCtx, cancel, nil
+}
+
+// wrapLiveErr turns a live-profile startup failure into something actionable.
+// The usual cause is the profile already being open in a browser window that
+// was started without a debug port.
+func wrapLiveErr(p Profile, port int, err error) error {
+	if err == nil || !p.Live() {
+		return err
+	}
+	if port == 0 {
+		port = DefaultDebugPort
+	}
+	if debugPortWS(port) != "" {
+		return err
+	}
+	return fmt.Errorf(
+		"%w (live profile %s: if the browser is already open on this profile, "+
+			"either close it or restart it with --remote-debugging-port=%d so it can be attached to)",
+		err, p.UserDataDir, port)
+}
+
 // detectSignIn checks whether the current page URL indicates a sign-in
 // redirect. Any URL on accounts.google.com or anything containing "/signin"
 // signals an expired session.
@@ -147,12 +329,12 @@ func detectSignIn(currentURL string) bool {
 
 // Login opens YouTube Studio non-headless and blocks until the operator
 // closes the browser window. The profile cookies persist after close.
-func (d *ChromedpDriver) Login(ctx context.Context, profileName string) error {
+func (d *ChromedpDriver) Login(ctx context.Context, p Profile) error {
 	deadline := DefaultLoginDeadline
 	ctx, cancelTO := context.WithTimeout(ctx, deadline)
 	defer cancelTO()
 
-	allocCtx, cancelAlloc, err := d.allocate(ctx, profileName, false)
+	allocCtx, cancelAlloc, err := d.allocate(ctx, p, false)
 	if err != nil {
 		return err
 	}
@@ -165,7 +347,7 @@ func (d *ChromedpDriver) Login(ctx context.Context, profileName string) error {
 		applyStealth(),
 		chromedp.Navigate("https://studio.youtube.com"),
 	); err != nil {
-		return err
+		return wrapLiveErr(p, p.DebugPort, err)
 	}
 	d.logf("login: browser open, waiting for operator to close")
 	// chromedp.NewContext registers a target-detached handler; when the
@@ -176,11 +358,11 @@ func (d *ChromedpDriver) Login(ctx context.Context, profileName string) error {
 
 // CheckChannel opens YT Studio headlessly and reads the channel name. Returns
 // ErrSessionExpired when the profile no longer has a session.
-func (d *ChromedpDriver) CheckChannel(ctx context.Context, profileName string) (string, error) {
+func (d *ChromedpDriver) CheckChannel(ctx context.Context, p Profile) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	allocCtx, cancelAlloc, err := d.allocate(ctx, profileName, true)
+	allocCtx, cancelAlloc, err := d.allocate(ctx, p, true)
 	if err != nil {
 		return "", err
 	}
@@ -197,7 +379,7 @@ func (d *ChromedpDriver) CheckChannel(ctx context.Context, profileName string) (
 		chromedp.Evaluate(jsReadChannelName, &channelName),
 	)
 	if err != nil {
-		return "", err
+		return "", wrapLiveErr(p, p.DebugPort, err)
 	}
 	if detectSignIn(currentURL) {
 		return "", ErrSessionExpired
@@ -210,11 +392,11 @@ func (d *ChromedpDriver) CheckChannel(ctx context.Context, profileName string) (
 // file via setInputFiles on the hidden <input type=file>, fill title and
 // description, optionally set thumbnail, wait for "Checks complete", set
 // visibility, extract the 11-char ID, Save, optionally add to playlist.
-func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in UploadInput) (UploadResult, error) {
+func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) (UploadResult, error) {
 	ctx, cancelTO := context.WithTimeout(ctx, DefaultUploadDeadline)
 	defer cancelTO()
 
-	allocCtx, cancelAlloc, err := d.allocate(ctx, profileName, false)
+	allocCtx, cancelAlloc, err := d.allocate(ctx, p, false)
 	if err != nil {
 		return UploadResult{}, err
 	}
@@ -253,7 +435,7 @@ func (d *ChromedpDriver) Upload(ctx context.Context, profileName string, in Uplo
 		chromedp.Sleep(3*time.Second),
 		chromedp.Location(&currentURL),
 	); err != nil {
-		return UploadResult{}, fmt.Errorf("open studio: %w", err)
+		return UploadResult{}, fmt.Errorf("open studio: %w", wrapLiveErr(p, p.DebugPort, err))
 	}
 	d.logf("step 1: at %s", currentURL)
 	if detectSignIn(currentURL) {

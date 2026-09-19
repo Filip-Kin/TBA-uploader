@@ -983,6 +983,44 @@
                         />
                         <div class="form-inline mb-2">
                             <label>
+                                Browser profile:
+                                <b-form-select
+                                    v-model="ytUploadConfig.browser_user_data_dir"
+                                    :options="ytBrowserDirOptions"
+                                    @change="ytBrowserDirChanged"
+                                />
+                            </label>
+                            <label v-if="ytUploadConfig.browser_user_data_dir">
+                                Profile folder:
+                                <b-form-select
+                                    v-model="ytUploadConfig.browser_profile_directory"
+                                    :options="ytBrowserProfileDirOptions"
+                                    @change="ytSaveConfig"
+                                />
+                            </label>
+                            <label v-if="ytUploadConfig.browser_user_data_dir">
+                                CDP port:
+                                <b-form-input
+                                    v-model.number="ytUploadConfig.browser_debug_port"
+                                    type="number"
+                                    style="width: 7em;"
+                                    @change="ytSaveConfig"
+                                />
+                            </label>
+                            <span
+                                v-if="ytUploadConfig.browser_user_data_dir"
+                                class="ml-2"
+                            >
+                                <small :class="ytBrowserAttached ? 'text-success' : 'text-muted'">
+                                    {{ ytBrowserAttached ? 'attached' : 'browser not running' }}
+                                </small>
+                            </span>
+                        </div>
+                        <div
+                            v-if="!ytUploadConfig.browser_user_data_dir"
+                            class="form-inline mb-2"
+                        >
+                            <label>
                                 Profile:
                                 <b-form-select
                                     v-model="ytUploadConfig.profile_name"
@@ -1013,7 +1051,25 @@
                             >
                                 Verify channel
                             </b-button>
-                            <span v-if="ytChannelStatus" class="ml-2">{{ ytChannelStatus }}</span>
+                        </div>
+                        <div
+                            v-if="ytUploadConfig.browser_user_data_dir"
+                            class="form-inline mb-2"
+                        >
+                            <b-button
+                                size="sm"
+                                variant="info"
+                                :disabled="ytChannelChecking"
+                                @click="ytCheckChannel"
+                            >
+                                Verify channel
+                            </b-button>
+                        </div>
+                        <div
+                            v-if="ytChannelStatus"
+                            class="mb-2"
+                        >
+                            <small>{{ ytChannelStatus }}</small>
                         </div>
                         <div class="form-inline">
                             <label>
@@ -1878,9 +1934,16 @@ export default {
             thumbnail_path: '',
             include_practice: false,
             include_test: false,
+            browser_user_data_dir: '',
+            browser_profile_directory: '',
+            browser_debug_port: 0,
         },
         ytUploadState: null,
         ytProfiles: [],
+        ytBrowserDirs: [],
+        ytBrowserProfileDirs: [],
+        ytBrowserAttached: false,
+        ytBrowserDefaultPort: 9222,
         ytChannelStatus: '',
         ytChannelChecking: false,
         ytReauthBanner: 'YouTube session expired. Click "Sign in / re-authenticate" to refresh it.',
@@ -2051,6 +2114,15 @@ export default {
                 out.unshift({value: '', text: '(no profiles yet)'});
             }
             return out;
+        },
+        ytBrowserDirOptions() {
+            return [{value: '', text: 'Separate profile'}].concat(
+                this.ytBrowserDirs.map(d => ({value: d, text: d})),
+            );
+        },
+        ytBrowserProfileDirOptions() {
+            const dirs = this.ytBrowserProfileDirs.length ? this.ytBrowserProfileDirs : ['Default'];
+            return dirs.map(d => ({value: d, text: d}));
         },
         ytVideoRows() {
             if (!this.ytUploadState || !this.ytUploadState.videos) return [];
@@ -3642,6 +3714,7 @@ export default {
             try {
                 await this.ytLoadProfiles();
                 await this.ytLoadConfig();
+                await this.ytLoadBrowser();
                 await this.ytLoadState();
             } catch (e) {
                 // Helper offline — UI shows the alert via autoAVError.
@@ -3655,6 +3728,39 @@ export default {
                 this.ytProfiles = [];
             }
         },
+        ytLoadBrowser: async function() {
+            // Installed browser profiles, plus whether a browser is already
+            // listening on the CDP port so we can attach instead of starting
+            // one.
+            try {
+                const params = $.param({
+                    user_data_dir: this.ytUploadConfig.browser_user_data_dir || '',
+                    debug_port: this.ytUploadConfig.browser_debug_port || 0,
+                });
+                const r = await $.getJSON(this.autoAVHelperApiUrl + '/api/upload/browser?' + params);
+                this.ytBrowserDirs = (r && r.user_data_dirs) || [];
+                this.ytBrowserProfileDirs = (r && r.profile_dirs) || [];
+                this.ytBrowserAttached = !!(r && r.debug_port_active);
+                if (r && r.default_debug_port) this.ytBrowserDefaultPort = r.default_debug_port;
+            } catch (e) {
+                this.ytBrowserDirs = [];
+                this.ytBrowserProfileDirs = [];
+                this.ytBrowserAttached = false;
+            }
+        },
+        ytBrowserDirChanged: async function() {
+            await this.ytLoadBrowser();
+            if (this.ytUploadConfig.browser_user_data_dir) {
+                if (!this.ytUploadConfig.browser_profile_directory) {
+                    this.ytUploadConfig.browser_profile_directory =
+                        this.ytBrowserProfileDirs.indexOf('Default') >= 0 ? 'Default' : (this.ytBrowserProfileDirs[0] || 'Default');
+                }
+                if (!this.ytUploadConfig.browser_debug_port) {
+                    this.ytUploadConfig.browser_debug_port = this.ytBrowserDefaultPort;
+                }
+            }
+            await this.ytSaveConfig();
+        },
         ytLoadConfig: async function() {
             if (!this.selectedEvent) return;
             try {
@@ -3667,6 +3773,9 @@ export default {
                     thumbnail_path: '',
                     include_practice: false,
                     include_test: false,
+                    browser_user_data_dir: '',
+                    browser_profile_directory: '',
+                    browser_debug_port: 0,
                 }, r || {});
             } catch (e) {
                 // ignore
@@ -3711,6 +3820,7 @@ export default {
             try {
                 await this.autoAVHelperPost('/api/upload/profile/login', {
                     profile_name: this.ytUploadConfig.profile_name,
+                    event_key: this.selectedEvent,
                 });
             } catch (e) {
                 // already reported on autoAVError
@@ -3719,13 +3829,15 @@ export default {
             setTimeout(() => this.ytLoadProfiles(), 2000);
         },
         ytCheckChannel: async function() {
-            if (!this.ytUploadConfig.profile_name) return;
+            if (!this.ytUploadConfig.profile_name && !this.ytUploadConfig.browser_user_data_dir) return;
             this.ytChannelChecking = true;
             this.ytChannelStatus = 'Checking channel...';
             try {
                 const r = await $.getJSON(
-                    this.autoAVHelperApiUrl +
-                    '/api/upload/profile/check?profile_name=' + encodeURIComponent(this.ytUploadConfig.profile_name)
+                    this.autoAVHelperApiUrl + '/api/upload/profile/check?' + $.param({
+                        profile_name: this.ytUploadConfig.profile_name || '',
+                        event_key: this.selectedEvent || '',
+                    })
                 );
                 if (r.error) {
                     this.ytChannelStatus = 'Error: ' + r.error;
@@ -3772,6 +3884,9 @@ export default {
             this.ytPollHandle = setInterval(() => {
                 if (!document.hidden) {
                     this.ytLoadState();
+                    if (this.ytUploadConfig.browser_user_data_dir) {
+                        this.ytLoadBrowser();
+                    }
                 }
             }, 5000);
         },
