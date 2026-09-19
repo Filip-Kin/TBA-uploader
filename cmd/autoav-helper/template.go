@@ -211,8 +211,18 @@ func collapseBlankRuns(lines []string) []string {
 // buildTemplateContext folds together the parsed filename, optional meta from
 // /api/rename, and the event-level config.
 func buildTemplateContext(p parsedFilename, meta *videoMeta, cfg eventConfig) *templateContext {
+	// FIM-AV Assistant's in-season names (QM5_MIKET.mp4) carry no human
+	// readable prefix, so fall back to the configured event name, then to the
+	// event code from the filename.
+	prefix := p.VideoPrefix
+	if prefix == "" {
+		prefix = cfg.EventName
+	}
+	if prefix == "" {
+		prefix = p.EventCode
+	}
 	ctx := &templateContext{
-		VideoPrefix: p.VideoPrefix,
+		VideoPrefix: prefix,
 		EventName:   cfg.EventName,
 		MatchLevel:  p.Level,
 		MatchNumber: p.MatchNumber,
@@ -223,9 +233,16 @@ func buildTemplateContext(p parsedFilename, meta *videoMeta, cfg eventConfig) *t
 	}
 	// Event year is the first whitespace-separated token of VideoPrefix if it
 	// looks like a 4-digit year. Cheap heuristic, no real parsing needed.
-	if i := strings.IndexByte(p.VideoPrefix, ' '); i == 4 {
-		if _, err := strconv.Atoi(p.VideoPrefix[:i]); err == nil {
-			ctx.EventYear = p.VideoPrefix[:i]
+	if i := strings.IndexByte(prefix, ' '); i == 4 {
+		if _, err := strconv.Atoi(prefix[:i]); err == nil {
+			ctx.EventYear = prefix[:i]
+		}
+	}
+	// Event keys start with the year (2026mitt), which covers the FIM-AV
+	// in-season names that have no year in them.
+	if ctx.EventYear == "" && len(cfg.EventKey) >= 4 {
+		if _, err := strconv.Atoi(cfg.EventKey[:4]); err == nil {
+			ctx.EventYear = cfg.EventKey[:4]
 		}
 	}
 	if meta != nil {

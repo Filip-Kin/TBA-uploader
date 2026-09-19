@@ -14,6 +14,7 @@ import (
 // Status values used for entries in state.videos.
 const (
 	statusNew      = "new"      // discovered, still being written to disk
+	statusCutting  = "cutting"  // FIM-AV Assistant is trimming it; hold the upload
 	statusStable   = "stable"   // size+mtime stable, ready to upload
 	statusUploading = "uploading"
 	statusUploaded = "uploaded"
@@ -35,6 +36,11 @@ type eventConfig struct {
 	ThumbnailPath       string `json:"thumbnail_path"`
 	IncludePractice     bool   `json:"include_practice"`
 	IncludeTest         bool   `json:"include_test"`
+	// CutWaitSeconds is the grace period given to FIM-AV Assistant to queue a
+	// dead-time cut before a recording is treated as final. 0 uses the default
+	// (see defaultCutWaitSeconds); a negative value uploads recordings as soon
+	// as they are stable, cut or not.
+	CutWaitSeconds int `json:"cut_wait_seconds,omitempty"`
 }
 
 // allianceTeam is one team's data inside a match's red or blue alliance.
@@ -66,7 +72,14 @@ type videoEntry struct {
 	Attempts    int        `json:"attempts"`
 	NextAttempt int64      `json:"next_attempt,omitempty"`
 	LastError   string     `json:"last_error,omitempty"`
-	Meta        *videoMeta `json:"meta,omitempty"`
+	// HoldReason explains a "cutting" status, e.g. "cut running".
+	HoldReason string `json:"hold_reason,omitempty"`
+	// ChangedAfterUpload is set when the file on disk changed after we
+	// published it, which means YouTube has the raw recording and the cut only
+	// exists locally. The entry stays uploaded; this is here so the operator
+	// can see it and re-upload by hand.
+	ChangedAfterUpload bool       `json:"changed_after_upload,omitempty"`
+	Meta               *videoMeta `json:"meta,omitempty"`
 }
 
 // eventState is the on-disk shape of state.json.

@@ -33,6 +33,8 @@ type uploadManager struct {
 	quit chan struct{}
 	// once-guarded shutdown.
 	stopOnce sync.Once
+	// once-guarded "you're pointed at the wrong folder" hint.
+	folderHintOnce sync.Once
 }
 
 // newUploadManager constructs a manager bound to the given state store and
@@ -128,16 +130,29 @@ func (m *uploadManager) scanNow() {
 			}
 
 			// Already-uploaded or skipped entries are immutable from here.
+			// One exception: note when an uploaded file changes underneath us.
+			// FIM-AV Assistant cuts dead time out in place, under the same
+			// name, so a change after upload means YouTube holds the raw
+			// recording and the cut only exists on disk.
 			if entry.Status == statusUploaded || entry.Status == statusSkipped {
+				if entry.Status == statusUploaded && (entry.Size != size || entry.Mtime != mtime) {
+					entry.Size = size
+					entry.Mtime = mtime
+					if !entry.ChangedAfterUpload {
+						entry.ChangedAfterUpload = true
+						log.Printf("scan: %s changed after upload; YouTube has the pre-cut video", name)
+					}
+				}
 				continue
 			}
 
-			// Detect change. Any change resets the stable timer.
+			// Detect change. Any change resets the stable timer. An
+			// in-progress cut lands here on every scan while ffmpeg writes.
 			if entry.Size != size || entry.Mtime != mtime {
 				entry.Size = size
 				entry.Mtime = mtime
 				entry.StableSince = 0
-				if entry.Status == statusStable {
+				if entry.Status == statusStable || entry.Status == statusCutting {
 					entry.Status = statusNew
 				}
 				continue
@@ -149,8 +164,20 @@ func (m *uploadManager) scanNow() {
 				entry.StableSince = now
 			}
 			if size > 0 && now-entry.StableSince >= int64(stableDelay/time.Second) {
-				if entry.Status == statusNew {
-					entry.Status = statusStable
+				if entry.Status == statusNew || entry.Status == statusCutting {
+					// A stable file isn't necessarily a finished one: FIM-AV
+					// Assistant replaces the recording in place with a trimmed
+					// cut, so hold it back until the cut is done.
+					if hold, reason := cutHold(dir, name, s.Config); hold {
+						if entry.Status != statusCutting || entry.HoldReason != reason {
+							log.Printf("scan: holding %s (%s)", name, reason)
+						}
+						entry.Status = statusCutting
+						entry.HoldReason = reason
+					} else {
+						entry.Status = statusStable
+						entry.HoldReason = ""
+					}
 				}
 			}
 		}
@@ -160,7 +187,30 @@ func (m *uploadManager) scanNow() {
 	}
 	// New stable files? Wake the upload loop.
 	m.nudge()
+	if len(seen) == 0 {
+		m.hintEventSubfolder(dir, entries)
+	}
 	_ = seen // present for future "removed file" handling.
+}
+
+// hintEventSubfolder logs once when the watched folder holds no videos but one
+// of its subfolders is a FIM-AV Assistant event folder. FIM-AV files recordings
+// into "{year} {event name}" under the vMix recording folder, and the scan is
+// deliberately not recursive (it would otherwise pick up Originals/).
+func (m *uploadManager) hintEventSubfolder(dir string, entries []os.DirEntry) {
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(filepath.Join(sub, fimavManifest)); err != nil {
+			continue
+		}
+		m.folderHintOnce.Do(func() {
+			log.Printf("scan: no videos in %s, but %s looks like the event folder; point -video-dir there", dir, sub)
+		})
+		return
+	}
 }
 
 // ── upload loop ──────────────────────────────────────────────────────────────
@@ -325,6 +375,9 @@ func (m *uploadManager) requestRetry(filename string) error {
 		v.Attempts = 0
 		v.NextAttempt = 0
 		v.LastError = ""
+		// An explicit retry overrides a cut hold: the operator has decided
+		// this file is the one they want on YouTube.
+		v.HoldReason = ""
 	})
 }
 

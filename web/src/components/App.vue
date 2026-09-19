@@ -1092,6 +1092,8 @@
                                         <td>{{ row.matchLabel }}</td>
                                         <td>
                                             {{ row.status }}
+                                            <small v-if="row.holdReason" class="text-muted">{{ row.holdReason }}</small>
+                                            <small v-if="row.changedAfterUpload" style="color: orange;">pre-cut on YouTube</small>
                                             <small v-if="row.lastError" style="color: red;">{{ row.lastError }}</small>
                                         </td>
                                         <td>
@@ -2057,6 +2059,8 @@ export default {
                     filename,
                     matchLabel: (v.meta && v.meta.match_label) || '',
                     status: v.status,
+                    holdReason: v.hold_reason || '',
+                    changedAfterUpload: !!v.changed_after_upload,
                     ytVideoId: v.yt_video_id || '',
                     lastError: v.last_error || '',
                 }))
