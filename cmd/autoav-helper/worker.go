@@ -252,10 +252,6 @@ func (m *uploadManager) uploadOne() {
 		return
 	}
 	cfg := m.store.snapshot().Config
-	if cfg.ProfileName == "" && cfg.BrowserUserDataDir == "" {
-		log.Printf("upload: no profile set, skipping %s", target.filename)
-		return
-	}
 
 	log.Printf("upload: starting %s", target.filename)
 	_ = m.store.update(func(s *eventState) {

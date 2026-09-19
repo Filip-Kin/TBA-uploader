@@ -167,6 +167,7 @@ func openStateStore(eventKey string) (*stateStore, error) {
 		s.state = eventState{
 			Config: eventConfig{
 				EventKey:            eventKey,
+				ProfileName:         defaultProfileName,
 				TitleTemplate:       defaultTitleTemplate,
 				DescriptionTemplate: defaultDescriptionTemplate,
 			},

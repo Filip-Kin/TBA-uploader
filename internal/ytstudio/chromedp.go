@@ -26,21 +26,60 @@ import (
 // ChromedpDriver is the production Driver. Construct with NewChromedpDriver.
 type ChromedpDriver struct {
 	ProfileRoot string // directory containing one subdir per profile_name
-	BrowserExe  string // optional explicit path; empty => autodetect
-	Verbose     bool
+	BrowserExe  string // optional explicit path; empty => managed browser, then autodetect
+	// Managed is the browser the driver downloads and owns. Used for
+	// tool-owned profiles unless BrowserExe says otherwise.
+	Managed *ManagedBrowser
+	Verbose bool
 }
 
-// NewChromedpDriver returns a driver that stores profiles under profileRoot.
-// If browserExe is "" the driver searches the usual install locations for
-// Brave, then Edge, then Chrome.
-func NewChromedpDriver(profileRoot, browserExe string) *ChromedpDriver {
-	return &ChromedpDriver{ProfileRoot: profileRoot, BrowserExe: browserExe}
+// NewChromedpDriver returns a driver that stores profiles under profileRoot and
+// keeps its own browser under browserRoot. If browserExe is set it overrides
+// both the managed browser and autodetection.
+func NewChromedpDriver(profileRoot, browserRoot, browserExe string) *ChromedpDriver {
+	d := &ChromedpDriver{ProfileRoot: profileRoot, BrowserExe: browserExe}
+	if browserRoot != "" {
+		// Download progress is always logged, Verbose or not: a first run is
+		// a couple of hundred megabytes and silence looks like a hang.
+		d.Managed = &ManagedBrowser{Root: browserRoot, Logf: func(format string, args ...any) {
+			log.Printf("ytstudio: "+format, args...)
+		}}
+	}
+	return d
 }
 
 func (d *ChromedpDriver) logf(format string, args ...any) {
 	if d.Verbose {
 		log.Printf("ytstudio: "+format, args...)
 	}
+}
+
+// browserFor resolves the binary to drive for a profile: an explicit path
+// first, then the browser we manage ourselves, then whatever is installed.
+//
+// The managed browser is the default because it cannot collide with the
+// operator's everyday browser. Chrome refuses to open a profile directory that
+// another process holds, so driving an installed browser only works while the
+// operator is not using it.
+func (d *ChromedpDriver) browserFor(ctx context.Context, p Profile) (string, error) {
+	if p.Exe != "" {
+		return p.Exe, nil
+	}
+	if d.BrowserExe != "" {
+		return d.BrowserExe, nil
+	}
+	// A live profile belongs to an installed browser and has to be driven by
+	// that same browser, not by our own copy.
+	if !p.Live() && d.Managed != nil {
+		exe, err := d.Managed.Ensure(ctx)
+		if err == nil {
+			return exe, nil
+		}
+		// No download (offline, or an unsupported platform): fall back to an
+		// installed browser rather than refusing to upload.
+		d.logf("managed browser unavailable (%v), falling back to an installed browser", err)
+	}
+	return d.findBrowser(p.UserDataDir)
 }
 
 // browserFamily guesses which browser owns a user-data directory from its
@@ -205,7 +244,7 @@ func (d *ChromedpDriver) allocate(ctx context.Context, p Profile, headless bool)
 	// belongs to the operator's running browser.
 	_ = os.Remove(filepath.Join(profileDir, "SingletonLock"))
 
-	exe, err := d.findBrowser("")
+	exe, err := d.browserFor(ctx, p)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -270,13 +309,9 @@ func (d *ChromedpDriver) allocateLive(ctx context.Context, p Profile) (context.C
 		return allocCtx, cancel, nil
 	}
 
-	exe := p.Exe
-	if exe == "" {
-		var err error
-		exe, err = d.findBrowser(p.UserDataDir)
-		if err != nil {
-			return nil, nil, err
-		}
+	exe, err := d.browserFor(ctx, p)
+	if err != nil {
+		return nil, nil, err
 	}
 	dir := p.Directory
 	if dir == "" {

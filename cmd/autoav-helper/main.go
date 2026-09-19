@@ -46,13 +46,25 @@ func main() {
 	flag.Parse()
 
 	// Driver shared by all event managers. ProfileRoot is the global
-	// {data_root}/profiles directory.
+	// {data_root}/profiles directory; the browser the driver downloads and
+	// owns lives in {data_root}/browser.
 	d := ytstudio.NewChromedpDriver(
 		filepath.Join(dataRoot(), "profiles"),
+		filepath.Join(dataRoot(), "browser"),
 		*browserExe,
 	)
 	d.Verbose = true
 	driver = d
+
+	// Fetch the browser now rather than in the middle of the first match, so
+	// the first upload of the day isn't waiting on a download.
+	if d.Managed != nil {
+		go func() {
+			if _, err := d.Managed.Ensure(context.Background()); err != nil {
+				log.Printf("browser not ready: %v", err)
+			}
+		}()
+	}
 
 	lock := sync.Mutex{}
 	mux := http.NewServeMux()
@@ -518,12 +530,21 @@ func apiUploadSkip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
-// browserProfile builds the driver profile from an event's config. A
-// configured browser user-data dir wins: that is the operator's own signed-in
-// browser profile, and using it means no separate sign-in to keep alive.
+// defaultProfileName is used when no profile has been chosen, so uploads work
+// without anyone having to invent a name first.
+const defaultProfileName = "youtube"
+
+// browserProfile builds the driver profile from an event's config. A configured
+// browser user-data dir wins: that is the operator's own browser profile, and
+// using it means no separate sign-in. Otherwise the driver uses its own browser
+// and its own profile, which is signed in once through Login.
 func browserProfile(cfg eventConfig) ytstudio.Profile {
+	name := cfg.ProfileName
+	if name == "" {
+		name = defaultProfileName
+	}
 	return ytstudio.Profile{
-		Name:        cfg.ProfileName,
+		Name:        name,
 		UserDataDir: cfg.BrowserUserDataDir,
 		Directory:   cfg.BrowserProfileDirectory,
 		DebugPort:   cfg.BrowserDebugPort,
@@ -544,6 +565,9 @@ func profileForRequest(eventKey, profileName string) ytstudio.Profile {
 			return browserProfile(cfg)
 		}
 	}
+	if profileName == "" {
+		profileName = defaultProfileName
+	}
 	return ytstudio.Profile{Name: profileName}
 }
 
@@ -559,11 +583,16 @@ func apiUploadBrowser(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("debug_port"); v != "" {
 		port, _ = strconv.Atoi(v)
 	}
+	managed_version := ""
+	if d, ok := driver.(*ytstudio.ChromedpDriver); ok && d.Managed != nil {
+		managed_version = d.Managed.InstalledVersion()
+	}
 	writeJSON(w, map[string]any{
 		"user_data_dirs":     dirs,
 		"profile_dirs":       browserProfileDirs(userDataDir),
 		"default_debug_port": ytstudio.DefaultDebugPort,
 		"debug_port_active":  ytstudio.DebugPortActive(port),
+		"managed_version":    managed_version,
 	})
 }
 
@@ -610,10 +639,6 @@ func apiUploadProfileLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profile := profileForRequest(body.EventKey, body.ProfileName)
-	if profile.Name == "" && !profile.Live() {
-		writeJSONError(w, http.StatusBadRequest, "profile_name required")
-		return
-	}
 	// Login blocks for as long as the browser stays open. Run it in a
 	// goroutine so the HTTP request returns immediately; the operator
 	// closes the window to finish. Use context.Background() because
@@ -628,10 +653,6 @@ func apiUploadProfileLogin(w http.ResponseWriter, r *http.Request) {
 
 func apiUploadProfileCheck(w http.ResponseWriter, r *http.Request) {
 	profile := profileForRequest(r.URL.Query().Get("event_key"), r.URL.Query().Get("profile_name"))
-	if profile.Name == "" && !profile.Live() {
-		writeJSONError(w, http.StatusBadRequest, "profile_name required")
-		return
-	}
 	name, err := driver.CheckChannel(r.Context(), profile)
 	if err != nil {
 		writeJSON(w, map[string]any{"error": err.Error()})

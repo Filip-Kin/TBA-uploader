@@ -1020,6 +1020,11 @@
                             v-if="!ytUploadConfig.browser_user_data_dir"
                             class="form-inline mb-2"
                         >
+                            <span class="mr-2">
+                                <small :class="ytBrowserManagedVersion ? 'text-success' : 'text-muted'">
+                                    {{ ytBrowserManagedVersion ? 'Chrome ' + ytBrowserManagedVersion : 'Chrome downloading' }}
+                                </small>
+                            </span>
                             <label>
                                 Profile:
                                 <b-form-select
@@ -1944,6 +1949,7 @@ export default {
         ytBrowserDirs: [],
         ytBrowserProfileDirs: [],
         ytBrowserAttached: false,
+        ytBrowserManagedVersion: '',
         ytBrowserDefaultPort: 9222,
         ytChannelStatus: '',
         ytChannelChecking: false,
@@ -2117,7 +2123,7 @@ export default {
             return out;
         },
         ytBrowserDirOptions() {
-            return [{value: '', text: 'Separate profile'}].concat(
+            return [{value: '', text: 'Managed Chrome'}].concat(
                 this.ytBrowserDirs.map(d => ({value: d, text: d})),
             );
         },
@@ -3742,11 +3748,13 @@ export default {
                 this.ytBrowserDirs = (r && r.user_data_dirs) || [];
                 this.ytBrowserProfileDirs = (r && r.profile_dirs) || [];
                 this.ytBrowserAttached = !!(r && r.debug_port_active);
+                this.ytBrowserManagedVersion = (r && r.managed_version) || '';
                 if (r && r.default_debug_port) this.ytBrowserDefaultPort = r.default_debug_port;
             } catch (e) {
                 this.ytBrowserDirs = [];
                 this.ytBrowserProfileDirs = [];
                 this.ytBrowserAttached = false;
+                this.ytBrowserManagedVersion = '';
             }
         },
         ytBrowserDirChanged: async function() {
@@ -3885,9 +3893,7 @@ export default {
             this.ytPollHandle = setInterval(() => {
                 if (!document.hidden) {
                     this.ytLoadState();
-                    if (this.ytUploadConfig.browser_user_data_dir) {
-                        this.ytLoadBrowser();
-                    }
+                    this.ytLoadBrowser();
                 }
             }, 5000);
         },
