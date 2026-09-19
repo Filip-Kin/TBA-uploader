@@ -142,6 +142,10 @@ func (m *uploadManager) scanNow() {
 				}
 				s.Videos[name] = entry
 			}
+			// The filename says which match this is, which is what links the
+			// finished upload to TBA. FIM-AV renames its own recordings, so
+			// nothing else fills this in.
+			fillMetaFromFilename(entry, name, s.Config.EventKey)
 
 			// Already-uploaded or skipped entries are immutable from here.
 			// One exception: note when an uploaded file changes underneath us.

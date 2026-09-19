@@ -445,6 +445,9 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 		// caller has to make on purpose.
 		visibility = "UNLISTED"
 	}
+	// Log what this run was actually asked to do, so "it never tried to add the
+	// playlist" can be answered from the console instead of guessed at.
+	d.logf("upload: title=%q visibility=%s playlist=%q", in.Title, visibility, in.PlaylistName)
 
 	abs, err := filepath.Abs(in.VideoPath)
 	if err != nil {
@@ -530,6 +533,18 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 		}
 	}
 
+	// Step 4.5: set the playlist here, in the dialog, where it needs no video
+	// ID. The dialog's own Save commits it along with everything else.
+	playlistSet := false
+	if in.PlaylistName != "" {
+		if err := d.selectPlaylist(bctx, in.PlaylistName); err != nil {
+			d.logf("playlist in dialog failed: %v (will retry after saving)", err)
+		} else {
+			playlistSet = true
+			d.logf("playlist %q set in the upload dialog", in.PlaylistName)
+		}
+	}
+
 	// Step 5: give the copyright checks a chance to finish, then carry on
 	// regardless.
 	//
@@ -593,9 +608,10 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 		return UploadResult{ChannelName: channelName}, errors.New("could not extract video id from YT Studio")
 	}
 
-	// Step 9: add to playlist (optional). Reopens the edit dialog.
+	// Step 9: if the playlist could not be set in the dialog, try again on the
+	// video's edit page now that there is an ID to open.
 	playlistError := ""
-	if in.PlaylistName != "" {
+	if in.PlaylistName != "" && !playlistSet {
 		if err := d.addToPlaylist(bctx, videoID, in.PlaylistName); err != nil {
 			d.logf("add-to-playlist failed: %v", err)
 			// Non-fatal: the video is up, and the operator can fix the playlist
@@ -629,7 +645,21 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 	); err != nil {
 		return fmt.Errorf("open edit page: %w", err)
 	}
+	if err := d.selectPlaylist(ctx, playlistName); err != nil {
+		return err
+	}
+	return d.savePlaylistEdit(ctx)
+}
 
+// selectPlaylist ticks a playlist in the playlist dropdown of whichever dialog
+// is open, and closes the dropdown with Done. It does not commit anything: in
+// the upload dialog the dialog's own Save does that, and on the edit page
+// savePlaylistEdit does.
+//
+// Doing this inside the upload dialog is the primary path, because it needs no
+// video ID: the ID is only available after saving, and when Studio hides it the
+// video would otherwise be uploaded with no playlist at all.
+func (d *ChromedpDriver) selectPlaylist(ctx context.Context, playlistName string) error {
 	// Step a: locate and coord-click the playlist dropdown trigger.
 	d.logf("playlist: locate dropdown trigger")
 	var tx, ty float64
@@ -743,6 +773,11 @@ func (d *ChromedpDriver) addToPlaylist(ctx context.Context, videoID, playlistNam
 		d.logf("playlist: dialog closed")
 	}
 
+	return nil
+}
+
+// savePlaylistEdit commits a playlist change made on the video's edit page.
+func (d *ChromedpDriver) savePlaylistEdit(ctx context.Context) error {
 	// Step d: click Save on the edit dialog to commit the change.
 	d.logf("playlist: locate Save")
 	var saveX, saveY float64
