@@ -49,24 +49,24 @@ func makeExtraMatchAllianceInfo2026() extraMatchAllianceInfo2026 {
 // hubScore2026 is the nested "hubScore" object in the breakdown. Counts come
 // from the report; points are derived (see deriveHubPoints2026).
 type hubScore2026 struct {
-	AutoCount       int `json:"autoCount"`
-	AutoPoints      int `json:"autoPoints"`
-	TransitionCount int `json:"transitionCount"`
+	AutoCount        int `json:"autoCount"`
+	AutoPoints       int `json:"autoPoints"`
+	TransitionCount  int `json:"transitionCount"`
 	TransitionPoints int `json:"transitionPoints"`
-	Shift1Count     int `json:"shift1Count"`
-	Shift1Points    int `json:"shift1Points"`
-	Shift2Count     int `json:"shift2Count"`
-	Shift2Points    int `json:"shift2Points"`
-	Shift3Count     int `json:"shift3Count"`
-	Shift3Points    int `json:"shift3Points"`
-	Shift4Count     int `json:"shift4Count"`
-	Shift4Points    int `json:"shift4Points"`
-	EndgameCount    int `json:"endgameCount"`
-	EndgamePoints   int `json:"endgamePoints"`
-	TeleopCount     int `json:"teleopCount"`
-	TeleopPoints    int `json:"teleopPoints"`
-	TotalCount      int `json:"totalCount"`
-	TotalPoints     int `json:"totalPoints"`
+	Shift1Count      int `json:"shift1Count"`
+	Shift1Points     int `json:"shift1Points"`
+	Shift2Count      int `json:"shift2Count"`
+	Shift2Points     int `json:"shift2Points"`
+	Shift3Count      int `json:"shift3Count"`
+	Shift3Points     int `json:"shift3Points"`
+	Shift4Count      int `json:"shift4Count"`
+	Shift4Points     int `json:"shift4Points"`
+	EndgameCount     int `json:"endgameCount"`
+	EndgamePoints    int `json:"endgamePoints"`
+	TeleopCount      int `json:"teleopCount"`
+	TeleopPoints     int `json:"teleopPoints"`
+	TotalCount       int `json:"totalCount"`
+	TotalPoints      int `json:"totalPoints"`
 }
 
 func addManualFields2026(breakdown map[string]interface{}, info fmsScoreInfo2026, extra extraMatchAllianceInfo2026, playoff bool) {
