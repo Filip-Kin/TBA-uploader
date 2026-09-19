@@ -31,13 +31,13 @@ func TestProfileLiveAndLabel(t *testing.T) {
 // open Brave's profile and vice versa.
 func TestBrowserFamily(t *testing.T) {
 	cases := map[string]string{
-		`C:\Users\filip\AppData\Local\Google\Chrome\User Data`:              "chrome",
+		`C:\Users\filip\AppData\Local\Google\Chrome\User Data`:               "chrome",
 		`C:\Users\filip\AppData\Local\BraveSoftware\Brave-Browser\User Data`: "brave",
 		`C:\Users\filip\AppData\Local\Microsoft\Edge\User Data`:              "edge",
 		"/home/filip/.config/google-chrome":                                  "chrome",
 		"/home/filip/.config/BraveSoftware/Brave-Browser":                    "brave",
-		"":                                                                   "",
-		"/tmp/some/profile":                                                  "",
+		"":                  "",
+		"/tmp/some/profile": "",
 	}
 	for dir, want := range cases {
 		if got := browserFamily(dir); got != want {

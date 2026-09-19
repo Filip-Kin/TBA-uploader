@@ -668,8 +668,8 @@ func apiVideosManualSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		MatchKey  string `json:"match_key"`
-		VideoID   string `json:"yt_video_id"`
+		MatchKey string `json:"match_key"`
+		VideoID  string `json:"yt_video_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MatchKey == "" {
 		writeJSONError(w, http.StatusBadRequest, "match_key required")

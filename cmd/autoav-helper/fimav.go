@@ -51,7 +51,7 @@ var (
 
 type cachedManifest struct {
 	size    int64
-	mtime    int64
+	mtime   int64
 	byName  map[string]fimavRecord
 	present bool // a manifest exists in this folder
 }

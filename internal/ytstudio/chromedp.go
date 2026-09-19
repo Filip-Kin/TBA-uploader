@@ -441,7 +441,9 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 
 	visibility := strings.ToUpper(strings.TrimSpace(in.Visibility))
 	if visibility == "" {
-		visibility = "PUBLIC"
+		// Unlisted by default: publishing a match video is a decision the
+		// caller has to make on purpose.
+		visibility = "UNLISTED"
 	}
 
 	abs, err := filepath.Abs(in.VideoPath)
@@ -494,14 +496,26 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 	}
 	d.logf("file attached: %s", abs)
 
-	// Step 3: details — title, description.
+	// Step 3: details — title, description. A big file keeps Studio busy for a
+	// while before it swaps the details dialog in.
 	if err := chromedp.Run(bctx,
 		chromedp.WaitVisible("#title-textarea", chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
-		fillTextbox("#title-textarea #textbox", in.Title),
-		fillTextbox("#description-textarea #textbox", in.Description),
 	); err != nil {
-		return UploadResult{}, fmt.Errorf("fill details: %w", err)
+		return UploadResult{}, fmt.Errorf("wait for details dialog: %w", err)
+	}
+	if err := chromedp.Run(bctx, setTextbox("#title-textarea #textbox", in.Title, d.logf)); err != nil {
+		return UploadResult{}, fmt.Errorf("fill title: %w", err)
+	}
+	if err := chromedp.Run(bctx, setTextbox("#description-textarea #textbox", in.Description, d.logf)); err != nil {
+		// A missing description is not worth abandoning a match video for.
+		d.logf("description not set: %v (continuing)", err)
+	}
+	// Studio will not enable Next until the audience question is answered, and
+	// a channel without a default has it blank. Match videos are not made for
+	// kids.
+	if err := chromedp.Run(bctx, answerAudience(d.logf)); err != nil {
+		d.logf("audience: %v (continuing)", err)
 	}
 
 	// Step 4: thumbnail (optional). The thumbnail tile has its own hidden
@@ -516,18 +530,28 @@ func (d *ChromedpDriver) Upload(ctx context.Context, p Profile, in UploadInput) 
 		}
 	}
 
-	// Step 5: wait for "Checks complete". This is the slowest step; YT can
-	// take many minutes on large files.
+	// Step 5: give the copyright checks a chance to finish, then carry on
+	// regardless.
+	//
+	// This must never be fatal. YouTube words the banner differently over time,
+	// it does not appear at all on a video Studio has already processed, and
+	// nothing in the rest of the flow depends on it: a video can be published
+	// while its checks are still running. Treating a missing banner as an error
+	// is what strands an upload on the first screen of the dialog with only the
+	// title filled in.
 	checksCtx, cancelChecks := context.WithTimeout(bctx, DefaultChecksCompleteDeadline)
 	defer cancelChecks()
 	if err := chromedp.Run(checksCtx,
-		waitForText(`(?i)checks complete`),
+		waitForText(`checks complete|no issues found|no copyright issues`),
 	); err != nil {
-		return UploadResult{}, fmt.Errorf("wait checks complete: %w", err)
+		d.logf("checks banner never appeared (%v), carrying on without it", err)
+	} else {
+		d.logf("checks complete")
 	}
-	d.logf("checks complete")
 
 	// Step 6: walk to the Visibility step. The dialog uses test-id buttons.
+	// An end-screen modal left open by a previous run swallows those clicks.
+	_ = chromedp.Run(bctx, closeEndscreenModal(d.logf))
 	if err := chromedp.Run(bctx,
 		jsClick(`button[test-id='VIDEO_ELEMENTS']`),
 		chromedp.Sleep(500*time.Millisecond),
@@ -1539,6 +1563,116 @@ func fillTextbox(selector, value string) chromedp.Action {
 		chromedp.Evaluate(js, &ok),
 		chromedp.Sleep(200 * time.Millisecond),
 	}
+}
+
+// setTextbox puts text into one of Studio's contenteditable boxes and checks it
+// landed, retrying once. The plain "focus then execCommand" route silently does
+// nothing when the click target has not settled yet, which is how an upload ends
+// up with a title and no description.
+func setTextbox(selector, value string, logf func(string, ...any)) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := chromedp.WaitVisible(selector, chromedp.ByQuery).Do(ctx); err != nil {
+			return err
+		}
+		var lastErr error
+		for attempt := 1; attempt <= 2; attempt++ {
+			// A real click focuses the box the way a person would; .focus()
+			// alone is not always enough inside Studio's shadow DOM.
+			if err := chromedp.Click(selector, chromedp.ByQuery, chromedp.NodeVisible).Do(ctx); err != nil {
+				lastErr = err
+			}
+			var ok bool
+			js := fmt.Sprintf(`
+				(() => {
+					const el = document.querySelector(%q);
+					if (!el) return false;
+					el.focus();
+					document.execCommand('selectAll', false, null);
+					document.execCommand('insertText', false, %q);
+					el.dispatchEvent(new Event('input', {bubbles: true}));
+					return true;
+				})()
+			`, selector, value)
+			if err := chromedp.Evaluate(js, &ok).Do(ctx); err != nil {
+				lastErr = err
+			}
+			if err := chromedp.Sleep(400 * time.Millisecond).Do(ctx); err != nil {
+				return err
+			}
+
+			// Verify: Studio trims and re-renders, so compare the first line.
+			var got string
+			read := fmt.Sprintf(`(document.querySelector(%q) || {}).innerText || ""`, selector)
+			if err := chromedp.Evaluate(read, &got).Do(ctx); err != nil {
+				lastErr = err
+				continue
+			}
+			wantHead := firstLine(value)
+			if wantHead == "" || strings.Contains(firstLine(got), wantHead) {
+				return nil
+			}
+			lastErr = fmt.Errorf("%s still reads %q after attempt %d", selector, firstLine(got), attempt)
+			logf("%v, retrying", lastErr)
+		}
+		return lastErr
+	})
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// answerAudience picks "not made for kids" when that question is unanswered.
+// Studio keeps Next disabled until it is, and a channel with no saved default
+// starts blank, which strands the dialog on its first screen.
+func answerAudience(logf func(string, ...any)) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var state string
+		js := `
+			(() => {
+				const radios = [...document.querySelectorAll("tp-yt-paper-radio-button[name^='VIDEO_MADE_FOR_KIDS']")];
+				if (!radios.length) return "absent";
+				if (radios.some(r => r.getAttribute("aria-checked") === "true")) return "already answered";
+				const no = radios.find(r => /NOT_MFK/.test(r.getAttribute("name") || ""));
+				if (!no) return "no option for not-made-for-kids";
+				no.click();
+				return "answered";
+			})()
+		`
+		if err := chromedp.Evaluate(js, &state).Do(ctx); err != nil {
+			return err
+		}
+		logf("audience: %s", state)
+		return nil
+	})
+}
+
+// closeEndscreenModal dismisses the end-screen editor if a previous run left it
+// open, since it swallows clicks meant for the dialog behind it.
+func closeEndscreenModal(logf func(string, ...any)) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var closed bool
+		js := `
+			(() => {
+				if (!document.querySelector("ytve-endscreen-modal")) return false;
+				const discard = [...document.querySelectorAll("button")]
+					.find(b => /discard/i.test(b.textContent || ""));
+				if (discard) { discard.click(); return true; }
+				return false;
+			})()
+		`
+		if err := chromedp.Evaluate(js, &closed).Do(ctx); err != nil {
+			return err
+		}
+		if closed {
+			logf("closed a leftover end-screen modal")
+			return chromedp.Sleep(time.Second).Do(ctx)
+		}
+		return nil
+	})
 }
 
 // waitForText polls document.body.innerText against a regex. Accepts patterns

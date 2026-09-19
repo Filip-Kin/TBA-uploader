@@ -59,7 +59,7 @@ type UploadInput struct {
 	Description   string
 	ThumbnailPath string // empty => skip thumbnail step
 	PlaylistName  string // exact playlist name; empty => skip playlist add
-	Visibility    string // PUBLIC | UNLISTED | PRIVATE; empty defaults to PUBLIC
+	Visibility    string // PUBLIC | UNLISTED | PRIVATE; empty defaults to UNLISTED
 }
 
 // UploadResult carries the YouTube video ID and the channel name observed
@@ -90,7 +90,9 @@ type Driver interface {
 
 // Defaults applied when fields are zero. Exported so callers can tune.
 var (
-	DefaultUploadDeadline       = 90 * time.Minute
-	DefaultChecksCompleteDeadline = 90 * time.Minute
-	DefaultLoginDeadline        = 30 * time.Minute
+	DefaultUploadDeadline = 90 * time.Minute
+	// How long to wait for the copyright-checks banner before publishing
+	// anyway. Bounded because the banner is optional: see step 5 of Upload.
+	DefaultChecksCompleteDeadline = 15 * time.Minute
+	DefaultLoginDeadline          = 30 * time.Minute
 )
