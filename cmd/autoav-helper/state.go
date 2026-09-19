@@ -13,13 +13,13 @@ import (
 
 // Status values used for entries in state.videos.
 const (
-	statusNew      = "new"      // discovered, still being written to disk
-	statusCutting  = "cutting"  // FIM-AV Assistant is trimming it; hold the upload
-	statusStable   = "stable"   // size+mtime stable, ready to upload
+	statusNew       = "new"     // discovered, still being written to disk
+	statusCutting   = "cutting" // FIM-AV Assistant is trimming it; hold the upload
+	statusStable    = "stable"  // size+mtime stable, ready to upload
 	statusUploading = "uploading"
-	statusUploaded = "uploaded"
-	statusFailed   = "failed"
-	statusSkipped  = "skipped"
+	statusUploaded  = "uploaded"
+	statusFailed    = "failed"
+	statusSkipped   = "skipped"
 )
 
 // eventConfig is the user-editable per-event configuration.
@@ -34,8 +34,10 @@ type eventConfig struct {
 	TitleTemplate       string `json:"title_template"`
 	DescriptionTemplate string `json:"description_template"`
 	ThumbnailPath       string `json:"thumbnail_path"`
-	IncludePractice     bool   `json:"include_practice"`
-	IncludeTest         bool   `json:"include_test"`
+	// Visibility is PUBLIC, UNLISTED or PRIVATE. Empty means unlisted.
+	Visibility      string `json:"visibility,omitempty"`
+	IncludePractice bool   `json:"include_practice"`
+	IncludeTest     bool   `json:"include_test"`
 	// Browser* point the driver at an installed browser's own profile instead
 	// of a profile this tool owns, so there is no second YouTube sign-in.
 	// BrowserUserDataDir is the browser's "User Data" folder,
@@ -72,16 +74,16 @@ type videoMeta struct {
 
 // videoEntry is one row in state.videos.
 type videoEntry struct {
-	Size        int64      `json:"size"`
-	Mtime       int64      `json:"mtime"`
-	Status      string     `json:"status"`
-	StableSince int64      `json:"stable_since,omitempty"`
-	YTVideoID   string     `json:"yt_video_id,omitempty"`
-	TitleUsed   string     `json:"title_used,omitempty"`
-	UploadedAt  string     `json:"uploaded_at,omitempty"`
-	Attempts    int        `json:"attempts"`
-	NextAttempt int64      `json:"next_attempt,omitempty"`
-	LastError   string     `json:"last_error,omitempty"`
+	Size        int64  `json:"size"`
+	Mtime       int64  `json:"mtime"`
+	Status      string `json:"status"`
+	StableSince int64  `json:"stable_since,omitempty"`
+	YTVideoID   string `json:"yt_video_id,omitempty"`
+	TitleUsed   string `json:"title_used,omitempty"`
+	UploadedAt  string `json:"uploaded_at,omitempty"`
+	Attempts    int    `json:"attempts"`
+	NextAttempt int64  `json:"next_attempt,omitempty"`
+	LastError   string `json:"last_error,omitempty"`
 	// HoldReason explains a "cutting" status, e.g. "cut running".
 	HoldReason string `json:"hold_reason,omitempty"`
 	// ChangedAfterUpload is set when the file on disk changed after we
@@ -168,6 +170,7 @@ func openStateStore(eventKey string) (*stateStore, error) {
 			Config: eventConfig{
 				EventKey:            eventKey,
 				ProfileName:         defaultProfileName,
+				Visibility:          defaultVisibility,
 				TitleTemplate:       defaultTitleTemplate,
 				DescriptionTemplate: defaultDescriptionTemplate,
 			},

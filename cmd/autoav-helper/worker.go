@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	scanInterval    = 5 * time.Second
-	stableDelay     = 20 * time.Second // size+mtime must hold this long
-	maxAttempts     = 3
-	baseBackoff     = 30 * time.Second
+	scanInterval = 5 * time.Second
+	stableDelay  = 20 * time.Second // size+mtime must hold this long
+	maxAttempts  = 3
+	baseBackoff  = 30 * time.Second
 )
 
 // uploadManager owns a single event's state, folder watcher, and upload loop.
@@ -267,7 +267,7 @@ func (m *uploadManager) uploadOne() {
 		Description:   target.description,
 		ThumbnailPath: cfg.ThumbnailPath,
 		PlaylistName:  cfg.PlaylistName,
-		Visibility:    "PUBLIC",
+		Visibility:    uploadVisibility(cfg),
 	})
 
 	if err != nil {
@@ -310,6 +310,24 @@ func (m *uploadManager) uploadOne() {
 	})
 	// Immediately try the next one.
 	m.nudge()
+}
+
+// defaultVisibility is what a video is set to when nothing says otherwise.
+// Unlisted: a match video going public is a decision someone makes on purpose.
+const defaultVisibility = "UNLISTED"
+
+// uploadVisibility resolves the configured visibility, accepting any casing and
+// falling back to unlisted for anything unrecognised.
+func uploadVisibility(cfg eventConfig) string {
+	switch strings.ToUpper(strings.TrimSpace(cfg.Visibility)) {
+	case "PUBLIC":
+		return "PUBLIC"
+	case "PRIVATE":
+		return "PRIVATE"
+	case "UNLISTED":
+		return "UNLISTED"
+	}
+	return defaultVisibility
 }
 
 // pendingUpload is one queued work item with rendered metadata.

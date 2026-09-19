@@ -124,3 +124,31 @@ func TestBrowserProfileDirs(t *testing.T) {
 		t.Error("empty user-data dir should list nothing")
 	}
 }
+
+// Visibility is a setting, and anything unrecognised must not publish.
+func TestUploadVisibility(t *testing.T) {
+	cases := map[string]string{
+		"":         "UNLISTED",
+		"unlisted": "UNLISTED",
+		"UNLISTED": "UNLISTED",
+		" public ": "PUBLIC",
+		"Public":   "PUBLIC",
+		"private":  "PRIVATE",
+		"nonsense": "UNLISTED",
+	}
+	for in, want := range cases {
+		if got := uploadVisibility(eventConfig{Visibility: in}); got != want {
+			t.Errorf("uploadVisibility(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// A fresh event starts unlisted.
+	dir := t.TempDir()
+	t.Setenv("TBA_UPLOADER_DATA_DIR", dir)
+	s, err := openStateStore("2026mibr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.snapshot().Config.Visibility; got != "UNLISTED" {
+		t.Errorf("new event visibility = %q, want UNLISTED", got)
+	}
+}

@@ -1085,6 +1085,14 @@
                                     @change="ytSaveConfig"
                                 />
                             </label>
+                            <label class="ml-2">
+                                Visibility:
+                                <b-form-select
+                                    v-model="ytUploadConfig.visibility"
+                                    :options="ytVisibilityOptions"
+                                    @change="ytSaveConfig"
+                                />
+                            </label>
                         </div>
                         <div>
                             <label style="display: block;">
@@ -1938,6 +1946,7 @@ export default {
             title_template: '',
             description_template: '',
             thumbnail_path: '',
+            visibility: 'UNLISTED',
             include_practice: false,
             include_test: false,
             browser_user_data_dir: '',
@@ -2121,6 +2130,13 @@ export default {
                 out.unshift({value: '', text: '(no profiles yet)'});
             }
             return out;
+        },
+        ytVisibilityOptions() {
+            return [
+                {value: 'UNLISTED', text: 'Unlisted'},
+                {value: 'PUBLIC', text: 'Public'},
+                {value: 'PRIVATE', text: 'Private'},
+            ];
         },
         ytBrowserDirOptions() {
             return [{value: '', text: 'Managed Chrome'}].concat(
@@ -3780,6 +3796,7 @@ export default {
                     title_template: '',
                     description_template: '',
                     thumbnail_path: '',
+                    visibility: 'UNLISTED',
                     include_practice: false,
                     include_test: false,
                     browser_user_data_dir: '',
