@@ -112,3 +112,52 @@ func TestScanFillsTbaMatchKey(t *testing.T) {
 		t.Errorf("practice entry got meta %+v", pr.Meta)
 	}
 }
+
+// A key with an event prefix is what TBA rejects, and earlier builds wrote them
+// into the state file, so a scan has to repair them rather than keep them.
+func TestFillMetaRepairsPrefixedKey(t *testing.T) {
+	entry := &videoEntry{Meta: &videoMeta{
+		TBAMatchKey: "2026mibr_qm1",
+		MatchLabel:  "Qualification 1",
+	}}
+	fillMetaFromFilename(entry, "QM1_MIBR.mp4")
+	if entry.Meta.TBAMatchKey != "qm1" {
+		t.Errorf("key = %q, want qm1", entry.Meta.TBAMatchKey)
+	}
+
+	// Playoff and final prefixes too.
+	playoff := &videoEntry{Meta: &videoMeta{TBAMatchKey: "2026mibr_sf3m1"}}
+	fillMetaFromFilename(playoff, "SF3M1_MIBR.mp4")
+	if playoff.Meta.TBAMatchKey != "sf3m1" {
+		t.Errorf("key = %q, want sf3m1", playoff.Meta.TBAMatchKey)
+	}
+
+	// A key already in the right shape is left alone, alliance data with it.
+	good := &videoEntry{Meta: &videoMeta{
+		TBAMatchKey: "qm9",
+		Alliances:   map[string][]allianceTeam{"red": {{Number: 2767}}},
+	}}
+	fillMetaFromFilename(good, "QM1_MIBR.mp4")
+	if good.Meta.TBAMatchKey != "qm9" || len(good.Meta.Alliances) != 1 {
+		t.Errorf("good meta disturbed: %+v", good.Meta)
+	}
+}
+
+func TestIsPartialMatchKey(t *testing.T) {
+	for key, want := range map[string]bool{
+		"qm1":          true,
+		"qm27":         true,
+		"sf3m1":        true,
+		"f1m2":         true,
+		"qf2m3":        true,
+		"ef1m1":        true,
+		"2026mibr_qm1": false,
+		"":             false,
+		"qm":           false,
+		"sf3":          false,
+	} {
+		if got := isPartialMatchKey(key); got != want {
+			t.Errorf("isPartialMatchKey(%q) = %v, want %v", key, got, want)
+		}
+	}
+}

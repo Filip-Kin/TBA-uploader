@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/lethosor/TBA-uploader/tba"
@@ -46,6 +47,14 @@ func tbaMatchKey(p parsedFilename) string {
 	return ""
 }
 
+// partialMatchKeyRe is the shape TBA's trusted API accepts in a match_videos
+// request: a qualification number, or a level with a set and a match.
+var partialMatchKeyRe = regexp.MustCompile(`^(qm\d+|(?:ef|qf|sf|f)\d+m\d+)$`)
+
+func isPartialMatchKey(key string) bool {
+	return partialMatchKeyRe.MatchString(key)
+}
+
 // fillMetaFromFilename gives an entry the match identity its filename implies,
 // without disturbing anything richer that /api/rename may have supplied. The
 // alliance data stays absent, so description templates behave exactly as before.
@@ -53,7 +62,7 @@ func fillMetaFromFilename(entry *videoEntry, filename string) {
 	if entry == nil {
 		return
 	}
-	if entry.Meta != nil && entry.Meta.TBAMatchKey != "" {
+	if entry.Meta != nil && isPartialMatchKey(entry.Meta.TBAMatchKey) {
 		return
 	}
 	p, ok := parseFilename(filename)
@@ -67,6 +76,8 @@ func fillMetaFromFilename(entry *videoEntry, filename string) {
 	if entry.Meta == nil {
 		entry.Meta = &videoMeta{}
 	}
+	// This also repairs keys written with an event prefix ("2026mibr_qm1"),
+	// which TBA rejects outright: "Invalid match IDs provided".
 	entry.Meta.TBAMatchKey = key
 	if entry.Meta.MatchLabel == "" {
 		entry.Meta.MatchLabel = p.matchLabel()

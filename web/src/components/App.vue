@@ -1799,6 +1799,10 @@ function makeAward(data) {
     }, data || {});
 }
 
+// The match key shape TBA's trusted API accepts: a qualification number, or a
+// level with a set and a match.
+const TBA_PARTIAL_MATCH_KEY = /^(qm\d+|(?:ef|qf|sf|f)\d+m\d+)$/;
+
 // Match order for the upload status table. Comparing filenames as text puts
 // Qualification 10 between 1 and 2, so sort by level then number then replay,
 // and fall back to a digit-aware filename compare for anything with no match
@@ -3957,6 +3961,10 @@ export default {
                 if (entry.status !== 'uploaded' || !entry.yt_video_id) continue;
                 const key = entry.meta && entry.meta.tba_match_key;
                 if (!key) continue;
+                // TBA takes the partial key only; anything else ("2026mibr_qm1"
+                // from an older build) makes the whole submit fail with
+                // "Invalid match IDs provided".
+                if (!TBA_PARTIAL_MATCH_KEY.test(key)) continue;
                 // Same shape as a row built from TBA's match list: an upload
                 // for a match nobody has fetched yet still needs tba and
                 // uploaded present, or the submit path reads undefined.
