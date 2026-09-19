@@ -3957,7 +3957,10 @@ export default {
                 if (entry.status !== 'uploaded' || !entry.yt_video_id) continue;
                 const key = entry.meta && entry.meta.tba_match_key;
                 if (!key) continue;
-                const v = this.videos[key] || {};
+                // Same shape as a row built from TBA's match list: an upload
+                // for a match nobody has fetched yet still needs tba and
+                // uploaded present, or the submit path reads undefined.
+                const v = this.videos[key] || {current: '', tba: '', uploaded: false};
                 if (v.current !== entry.yt_video_id) {
                     v.current = entry.yt_video_id;
                     Vue.set(this.videos, key, v);
@@ -3971,7 +3974,7 @@ export default {
             // Manual entries (server-side persistence).
             const manualMap = this.ytUploadState.manual_video_ids || {};
             for (const [key, vid] of Object.entries(manualMap)) {
-                const v = this.videos[key] || {};
+                const v = this.videos[key] || {current: '', tba: '', uploaded: false};
                 if (!v.current && v.current !== vid) {
                     v.current = vid;
                     Vue.set(this.videos, key, v);

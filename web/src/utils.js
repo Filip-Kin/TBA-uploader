@@ -79,6 +79,12 @@ const utils = Object.freeze({
     },
 
     cleanYoutubeUrl(url) {
+        // Callers pass whatever a video row happens to hold, including nothing
+        // at all for a match TBA has no video for yet.
+        if (url === null || url === undefined) {
+            return '';
+        }
+        url = String(url);
         var match = url.match(/(youtu.be\/|\/video\/|[?&]v=)([A-Za-z0-9_-]+)/);
         if (match) {
             url = match[2];
