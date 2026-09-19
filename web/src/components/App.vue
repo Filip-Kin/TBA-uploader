@@ -1799,6 +1799,36 @@ function makeAward(data) {
     }, data || {});
 }
 
+// Match order for the upload status table. Comparing filenames as text puts
+// Qualification 10 between 1 and 2, so sort by level then number then replay,
+// and fall back to a digit-aware filename compare for anything with no match
+// metadata (practice, test, hand-dropped files).
+const YT_LEVEL_ORDER = {
+    test: 0,
+    practice: 1,
+    qualification: 2,
+    playoff: 3,
+    final: 4,
+    manual: 5,
+};
+
+function ytRowSortKey(filename, meta) {
+    const pad = (n, width) => String(Math.max(0, Number(n) || 0)).padStart(width, '0');
+    if (meta && meta.match_number) {
+        const level = YT_LEVEL_ORDER[String(meta.match_level || '').toLowerCase()];
+        return [
+            pad(level === undefined ? 8 : level, 1),
+            pad(meta.match_number, 5),
+            pad(meta.play || 1, 2),
+            filename,
+        ].join('|');
+    }
+    // No metadata: keep runs of digits comparable by padding them.
+    const natural = String(filename).toLowerCase()
+        .replace(/\d+/g, d => pad(d, 8));
+    return '9|' + natural;
+}
+
 const EXTRA_FIELDS = {
     2018: {
         invert_auto: false,
@@ -2158,8 +2188,9 @@ export default {
                     changedAfterUpload: !!v.changed_after_upload,
                     ytVideoId: v.yt_video_id || '',
                     lastError: v.last_error || '',
+                    sortKey: ytRowSortKey(filename, v.meta),
                 }))
-                .sort((a, b) => a.filename.localeCompare(b.filename));
+                .sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
         },
     },
     watch: {
