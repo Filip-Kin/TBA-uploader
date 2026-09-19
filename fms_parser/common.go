@@ -22,6 +22,7 @@ var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, erro
 	2023: parseHTMLtoJSON2023,
 	2024: parseHTMLtoJSON2024,
 	2025: parseHTMLtoJSON2025,
+	2026: parseHTMLtoJSON2026,
 }
 
 func ParseHTMLtoJSON(year int, filename string, config FMSParseConfig) (map[string]interface{}, error) {
@@ -69,6 +70,9 @@ var extraAllianceInfoCtors = map[int]func() ExtraMatchAllianceInfo{
 	},
 	2024: func() ExtraMatchAllianceInfo {
 		return makeExtraMatchAllianceInfo2024()
+	},
+	2026: func() ExtraMatchAllianceInfo {
+		return makeExtraMatchAllianceInfo2026()
 	},
 }
 

@@ -29,7 +29,13 @@ function RankingReducerAverage(breakdownFields, defaultValue=-1) {
                         mult = -1;
                         field = field.replace(/^-/, '');
                     }
-                    const breakdownValue = match.score_breakdown[alliance][field];
+                    // Dotted paths reach into nested breakdown objects, e.g.
+                    // 2026's "hubScore.autoPoints".
+                    let breakdownValue = match.score_breakdown[alliance];
+                    for (const part of field.split('.')) {
+                        breakdownValue = (breakdownValue === undefined || breakdownValue === null) ?
+                            undefined : breakdownValue[part];
+                    }
                     if (breakdownValue !== undefined) {
                         matchValue += mult * breakdownValue;
                     }
@@ -93,6 +99,12 @@ const rankingBreakdownSources = {
         'Avg Match': RankingReducerAverage(['totalPoints', '-foulPoints']),
         'Avg Auto': RankingReducerAverage(['autoPoints']),
         'Avg Barge': RankingReducerAverage(['endGameBargePoints']),
+    },
+    2026: {
+        'Ranking Score': RankingReducerAverage('rp'),
+        'Avg Match': RankingReducerAverage(['totalPoints', '-foulPoints']),
+        'Avg Auto Fuel': RankingReducerAverage('hubScore.autoPoints'),
+        'Avg Tower': RankingReducerAverage('totalTowerPoints'),
     },
 };
 
