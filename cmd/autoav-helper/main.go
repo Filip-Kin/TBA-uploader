@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html"
@@ -41,7 +42,7 @@ var (
 func main() {
 	addr := flag.String("listen", ":8807", "address to listen on")
 	browserExe := flag.String("browser", "", "explicit browser executable path (else autodetect)")
-	flag.StringVar(&settings.VideoDir, "video-dir", "/tmp/videos", "default folder containing recorded videos")
+	flag.StringVar(&settings.VideoDir, "video-dir", defaultVideoDir(), "folder containing recorded videos (FIM-AV's \"{year} {event name}\" folder)")
 	flag.Parse()
 
 	// Driver shared by all event managers. ProfileRoot is the global
@@ -186,6 +187,17 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	`, html.EscapeString(settings.VideoDir))
 }
 
+// defaultVideoDir is the operator's Videos folder, which is where vMix records
+// by default and therefore where FIM-AV Assistant creates its per-event folder.
+// The event folder itself still has to be set; this is only a better starting
+// point than a path that exists on no recording machine.
+func defaultVideoDir() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, "Videos")
+	}
+	return filepath.Join(os.TempDir(), "videos")
+}
+
 func handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if val := r.FormValue("VideoDir"); val != "" {
 		settings.VideoDir = val
@@ -198,6 +210,13 @@ func apiList(w http.ResponseWriter, r *http.Request) {
 	suffix := r.URL.Query().Get("suffix")
 
 	allFiles, err := os.ReadDir(settings.VideoDir)
+	if errors.Is(err, os.ErrNotExist) {
+		// Say which folder is missing and what to do about it, rather than
+		// reporting an internal error.
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf(
+			"video folder does not exist: %s (set -video-dir to the event folder)", settings.VideoDir))
+		return
+	}
 	if err != nil {
 		panic(err)
 	}

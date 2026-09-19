@@ -35,6 +35,9 @@ type uploadManager struct {
 	stopOnce sync.Once
 	// once-guarded "you're pointed at the wrong folder" hint.
 	folderHintOnce sync.Once
+	// whether the last scan found the folder missing, so a folder that is not
+	// there yet is reported once instead of every five seconds.
+	missingDirLogged bool
 }
 
 // newUploadManager constructs a manager bound to the given state store and
@@ -94,10 +97,21 @@ func (m *uploadManager) scanNow() {
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		// Folder doesn't exist yet or is unreadable; log once per scan and
-		// move on. A missing video_dir is normal before an event starts.
-		log.Printf("scan: read %s: %v", dir, err)
+		// A missing folder is normal before an event starts, and the scan runs
+		// every few seconds, so say it once and stay quiet until it shows up.
+		if !m.missingDirLogged {
+			m.missingDirLogged = true
+			if errors.Is(err, os.ErrNotExist) {
+				log.Printf("scan: %s does not exist; set -video-dir to the event folder", dir)
+			} else {
+				log.Printf("scan: read %s: %v", dir, err)
+			}
+		}
 		return
+	}
+	if m.missingDirLogged {
+		m.missingDirLogged = false
+		log.Printf("scan: watching %s", dir)
 	}
 	now := nowUnix()
 	seen := map[string]bool{}
