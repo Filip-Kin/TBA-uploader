@@ -2499,6 +2499,9 @@ export default {
                     // requires manual match code override
                     return;
                 }
+                // FMS 2026 lists a match as soon as teleop ends, so what was
+                // fetched at WaitingForPostResults can predate posting.
+                await this.fetchMatches();
                 if (this.fetchedScorelessMatches) {
                     return;
                 }

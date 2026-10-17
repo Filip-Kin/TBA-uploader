@@ -115,6 +115,14 @@ func downloadMatches(level int, folder string, new_only bool) ([]string, error) 
 	if !ok {
 		return nil, err
 	}
+	list_raw, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(list_raw)) > 0 && bytes.TrimSpace(list_raw)[0] == '{' {
+		// FMS 2026+: the match list is JSON
+		return downloadMatchesJSON(list_raw, matches_dir, backups_dir, new_only)
+	}
 	reader, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -160,6 +168,89 @@ func downloadMatches(level int, folder string, new_only bool) ([]string, error) 
 	return files, nil
 }
 
+func fmsGetJSON(url string) ([]byte, error) {
+	client := http.Client{Timeout: 10 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: HTTP %d", url, response.StatusCode)
+	}
+	return body, nil
+}
+
+// downloadMatchesJSON handles FMS 2026+, where the match list is JSON and each
+// match's score breakdown comes from the GameSpecific API. The list contains
+// every match whose teleop has ended, which includes a match still waiting for
+// its scores to be posted. So every match not yet uploaded (no .receipt) is
+// fetched again on each call, and a file is returned whenever its content
+// changed, so posted or edited scores replace what was fetched before.
+func downloadMatchesJSON(list_raw []byte, matches_dir, backups_dir string, new_only bool) ([]string, error) {
+	var list struct {
+		Matches []map[string]interface{} `json:"matches"`
+	}
+	if err := json.Unmarshal(list_raw, &list); err != nil {
+		return nil, fmt.Errorf("match list: %s", err)
+	}
+
+	var files []string
+	for _, match := range list.Matches {
+		match_id, _ := match["fmsMatchId"].(string)
+		match_number, _ := match["matchNumber"].(float64)
+		play_number, _ := match["playNumber"].(float64)
+		if match_id == "" || match_number < 1 {
+			logger.Printf("Skipping match list entry with no ID or number: %v\n", match)
+			continue
+		}
+		name := fmt.Sprintf("%d-%d", int(match_number), int(play_number))
+		match_path := path.Join(matches_dir, name+".fmsjson")
+		if new_only && fileExists(path.Join(matches_dir, name+".receipt")) {
+			continue
+		}
+
+		score_raw, err := fmsGetJSON(fmt.Sprintf("%s/GameSpecific/api/v1.0/fieldmonitor_gs/GetScoreDetails?matchId=%s", FMSConfig.FmsUrl, match_id))
+		if err != nil {
+			logger.Printf("Failed to download scores for %s: %s\n", name, err)
+			continue
+		}
+		var score interface{}
+		if err := json.Unmarshal(score_raw, &score); err != nil {
+			logger.Printf("Failed to parse scores for %s: %s\n", name, err)
+			continue
+		}
+		content, err := json.MarshalIndent(map[string]interface{}{
+			"match": match,
+			"score": score,
+		}, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+
+		old_content, read_err := ioutil.ReadFile(match_path)
+		if new_only && read_err == nil && bytes.Equal(old_content, content) && fileExists(replaceExtension(match_path, "json")) {
+			continue
+		}
+		if err := ioutil.WriteFile(match_path, content, os.ModePerm); err != nil {
+			return nil, err
+		}
+		files = append(files, match_path)
+
+		dest := path.Join(backups_dir, fmt.Sprintf("%s-%x.fmsjson", name, md5.Sum(content)))
+		if !fileExists(dest) {
+			if err := ioutil.WriteFile(dest, content, os.ModePerm); err != nil {
+				logger.Printf("Failed to back up %s to %s: %s\n", match_path, dest, err)
+			}
+		}
+	}
+	return files, nil
+}
+
 func copyFile(src, dest string, overwrite bool) error {
 	if !overwrite && fileExists(dest) {
 		return errors.New(fmt.Sprintf("destination already exists: %s", dest))
@@ -183,6 +274,138 @@ func downloadRankings(level int, folder string) ([]byte, error) {
 	ranking_path := getRankingDownloadPath(level, folder)
 	os.MkdirAll(ranking_path, os.ModePerm)
 
+	out, api_err := downloadRankingsAPI()
+	if api_err != nil {
+		logger.Printf("Ranking API fetch failed, trying the pit display route: %s\n", api_err)
+		var pit_err error
+		out, pit_err = downloadRankingsPit()
+		if pit_err != nil {
+			return nil, fmt.Errorf("%s; %s", api_err, pit_err)
+		}
+	}
+
+	ranking_files, _ := listFilesWithExtension(ranking_path, "json")
+	i := len(ranking_files) + 1
+	var dest_filename string
+	for {
+		dest_filename = path.Join(ranking_path, fmt.Sprintf("%05d.json", i))
+		if !fileExists(dest_filename) {
+			break
+		}
+		i += 1
+	}
+	err := ioutil.WriteFile(dest_filename, out, os.ModePerm)
+	return out, err
+}
+
+// fmsRankingRow is the row shape the web UI expects (it matches what the
+// pre-2026 pit display route returned).
+type fmsRankingRow struct {
+	Rank   int     `json:"rank"`
+	Team   int     `json:"team"`
+	Wins   int     `json:"wins"`
+	Losses int     `json:"losses"`
+	Ties   int     `json:"ties"`
+	Played int     `json:"played"`
+	DQ     float64 `json:"dq"`
+	Sort1  float64 `json:"sort1"`
+	Sort2  float64 `json:"sort2"`
+	Sort3  float64 `json:"sort3"`
+	Sort4  float64 `json:"sort4"`
+	Sort5  float64 `json:"sort5"`
+	Sort6  float64 `json:"sort6"`
+}
+
+// downloadRankingsAPI reads rankings from FMS 2026+. The pit display route is
+// gone. GetQualificationRankData has team numbers but no played or DQ counts;
+// GetTeamRankings has those but only FMS team IDs. Both read the same
+// TeamRankings rows, so they are joined on rank and checked against each
+// other.
+func downloadRankingsAPI() ([]byte, error) {
+	rank_data_raw, err := fmsGetJSON(FMSConfig.FmsUrl + "/api/v1.0/audience/get/GetQualificationRankData")
+	if err != nil {
+		return nil, err
+	}
+	var rank_data struct {
+		TeamRanks []struct {
+			Rank       int     `json:"rank"`
+			TeamNumber int     `json:"teamNumber"`
+			Sort1      float64 `json:"sort1"`
+			Sort2      float64 `json:"sort2"`
+			Sort3      float64 `json:"sort3"`
+			Sort4      float64 `json:"sort4"`
+			Sort5      float64 `json:"sort5"`
+			Sort6      float64 `json:"sort6"`
+			Wins       int     `json:"wins"`
+			Losses     int     `json:"losses"`
+			Ties       int     `json:"ties"`
+		} `json:"teamRanks"`
+	}
+	if err := json.Unmarshal(rank_data_raw, &rank_data); err != nil {
+		return nil, fmt.Errorf("GetQualificationRankData: %s", err)
+	}
+
+	team_rankings_raw, err := fmsGetJSON(FMSConfig.FmsUrl + "/api/v1.0/rankings/get/GetTeamRankings")
+	if err != nil {
+		return nil, err
+	}
+	var team_rankings []struct {
+		Ranking       int     `json:"ranking"`
+		Wins          int     `json:"wins"`
+		Losses        int     `json:"losses"`
+		Ties          int     `json:"ties"`
+		MatchesPlayed int     `json:"matchesPlayed"`
+		Disqualified  float64 `json:"disqualified"`
+		SortOrder1    float64 `json:"sortOrder1"`
+	}
+	if err := json.Unmarshal(team_rankings_raw, &team_rankings); err != nil {
+		return nil, fmt.Errorf("GetTeamRankings: %s", err)
+	}
+
+	by_rank := make(map[int]int)
+	for i, r := range team_rankings {
+		if _, dup := by_rank[r.Ranking]; dup {
+			return nil, fmt.Errorf("GetTeamRankings: rank %d appears twice", r.Ranking)
+		}
+		by_rank[r.Ranking] = i
+	}
+
+	rows := make([]fmsRankingRow, 0, len(rank_data.TeamRanks))
+	for _, r := range rank_data.TeamRanks {
+		i, ok := by_rank[r.Rank]
+		if !ok {
+			return nil, fmt.Errorf("rank %d (team %d) missing from GetTeamRankings; rankings may have changed mid-fetch, try again", r.Rank, r.TeamNumber)
+		}
+		t := team_rankings[i]
+		if t.Wins != r.Wins || t.Losses != r.Losses || t.Ties != r.Ties || t.SortOrder1 != r.Sort1 {
+			return nil, fmt.Errorf("rank %d (team %d) differs between FMS ranking routes; rankings may have changed mid-fetch, try again", r.Rank, r.TeamNumber)
+		}
+		rows = append(rows, fmsRankingRow{
+			Rank:   r.Rank,
+			Team:   r.TeamNumber,
+			Wins:   r.Wins,
+			Losses: r.Losses,
+			Ties:   r.Ties,
+			Played: t.MatchesPlayed,
+			DQ:     t.Disqualified,
+			Sort1:  r.Sort1,
+			Sort2:  r.Sort2,
+			Sort3:  r.Sort3,
+			Sort4:  r.Sort4,
+			Sort5:  r.Sort5,
+			Sort6:  r.Sort6,
+		})
+	}
+	if len(rows) != len(team_rankings) {
+		return nil, fmt.Errorf("FMS ranking routes disagree on team count (%d vs %d); try again", len(rows), len(team_rankings))
+	}
+
+	return json.Marshal(map[string]interface{}{"rankings": rows})
+}
+
+// downloadRankingsPit reads rankings from the pit display route FMS served
+// before 2026.
+func downloadRankingsPit() ([]byte, error) {
 	// event ID, then cache ID - both can be arbitrary. Appears that only changing the event ID bypasses the cache.
 	// for sanity, still allow caching for 30sec.
 	cache_key := time.Now().Unix() / 30
@@ -197,21 +420,15 @@ func downloadRankings(level int, folder string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 	out, err := ioutil.ReadAll(response.Body)
-	if err == nil {
-		ranking_files, _ := listFilesWithExtension(ranking_path, "json")
-		i := len(ranking_files) + 1
-		var dest_filename string
-		for {
-			dest_filename = path.Join(ranking_path, fmt.Sprintf("%05d.json", i))
-			if !fileExists(dest_filename) {
-				break
-			}
-			i += 1
-		}
-		err = ioutil.WriteFile(dest_filename, out, os.ModePerm)
+	if err != nil {
+		return nil, err
 	}
-	return out, err
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("pit display route: HTTP %d", response.StatusCode)
+	}
+	return out, nil
 }
 
 type reportPage map[string]interface{}

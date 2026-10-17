@@ -25,7 +25,18 @@ var parsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, erro
 	2026: parseHTMLtoJSON2026,
 }
 
+// FMS versions that serve match scores as JSON instead of an HTML page
+var jsonParsers = map[int]func(string, FMSParseConfig) (map[string]interface{}, error){
+	2026: parseJSONtoJSON2026,
+}
+
 func ParseHTMLtoJSON(year int, filename string, config FMSParseConfig) (map[string]interface{}, error) {
+	if strings.HasSuffix(filename, ".fmsjson") {
+		if parser, ok := jsonParsers[year]; ok {
+			return parser(filename, config)
+		}
+		return nil, fmt.Errorf("ParseHTMLtoJSON: no JSON parser for year %d", year)
+	}
 	if parser, ok := parsers[year]; ok {
 		return parser(filename, config)
 	} else {

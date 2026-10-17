@@ -1,0 +1,113 @@
+{
+  "comp_level": "qm",
+  "alliances": {
+    "blue": {
+      "team_keys": [
+        "frc33",
+        "frc5708",
+        "frc4810"
+      ],
+      "score": 216,
+      "surrogate_team_keys": [],
+      "dq_team_keys": []
+    },
+    "red": {
+      "team_keys": [
+        "frc3414",
+        "frc7598",
+        "frc1506"
+      ],
+      "score": 251,
+      "surrogate_team_keys": [],
+      "dq_team_keys": []
+    }
+  },
+  "score_breakdown": {
+    "blue": {
+      "adjustPoints": 0,
+      "autoTowerPoints": 0,
+      "endGameTowerPoints": 0,
+      "foulPoints": 0,
+      "g206Penalty": false,
+      "minorFoulCount": 0,
+      "majorFoulCount": 0,
+      "rp": 1,
+      "totalAutoPoints": 74,
+      "totalPoints": 216,
+      "totalTeleopPoints": 142,
+      "totalTowerPoints": 0,
+      "autoTowerRobot1": "None",
+      "autoTowerRobot2": "None",
+      "autoTowerRobot3": "None",
+      "endGameTowerRobot1": "None",
+      "endGameTowerRobot2": "None",
+      "endGameTowerRobot3": "None",
+      "energizedAchieved": true,
+      "superchargedAchieved": false,
+      "traversalAchieved": false,
+      "hubScore": {
+        "autoCount": 74,
+        "autoPoints": 74,
+        "transitionCount": 0,
+        "shift1Count": 0,
+        "shift2Count": 29,
+        "shift3Count": 0,
+        "shift4Count": 69,
+        "endgameCount": 44,
+        "teleopCount": 142,
+        "teleopPoints": 142,
+        "totalCount": 216,
+        "totalPoints": 216,
+        "transitionPoints": 0,
+        "shift1Points": 0,
+        "shift2Points": 29,
+        "shift3Points": 0,
+        "shift4Points": 69,
+        "endgamePoints": 44
+      }
+    },
+    "red": {
+      "adjustPoints": 0,
+      "autoTowerPoints": 0,
+      "endGameTowerPoints": 0,
+      "foulPoints": 0,
+      "g206Penalty": false,
+      "minorFoulCount": 0,
+      "majorFoulCount": 0,
+      "rp": 3,
+      "totalAutoPoints": 63,
+      "totalPoints": 251,
+      "totalTeleopPoints": 188,
+      "totalTowerPoints": 0,
+      "autoTowerRobot1": "None",
+      "autoTowerRobot2": "None",
+      "autoTowerRobot3": "None",
+      "endGameTowerRobot1": "None",
+      "endGameTowerRobot2": "None",
+      "endGameTowerRobot3": "None",
+      "energizedAchieved": true,
+      "superchargedAchieved": false,
+      "traversalAchieved": false,
+      "hubScore": {
+        "autoCount": 63,
+        "autoPoints": 63,
+        "transitionCount": 3,
+        "shift1Count": 74,
+        "shift2Count": 0,
+        "shift3Count": 51,
+        "shift4Count": 0,
+        "endgameCount": 60,
+        "teleopCount": 188,
+        "teleopPoints": 188,
+        "totalCount": 251,
+        "totalPoints": 251,
+        "transitionPoints": 3,
+        "shift1Points": 74,
+        "shift2Points": 0,
+        "shift3Points": 51,
+        "shift4Points": 0,
+        "endgamePoints": 60
+      }
+    }
+  }
+}
