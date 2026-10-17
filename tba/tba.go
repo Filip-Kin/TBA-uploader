@@ -35,7 +35,9 @@ func SendRequest(tba_url string, url string, body []byte, params *EventParams) (
 	}
 	request.Header.Add("X-TBA-Auth-Id", params.Auth)
 	request.Header.Add("X-TBA-Auth-Sig", sig)
-	client := http.Client{Timeout: 5 * time.Second}
+	// TBA can take well over 5 seconds to answer a write with many matches,
+	// and still apply it. A short timeout reported success as a failure.
+	client := http.Client{Timeout: 60 * time.Second}
 	return client.Do(request)
 }
 
